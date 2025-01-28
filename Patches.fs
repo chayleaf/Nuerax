@@ -7,6 +7,10 @@ open HarmonyLib
 type public Patches() =
     static let autoClick = false
 
+    [<HarmonyPatch(typeof<BonusObject>, nameof Unchecked.defaultof<BonusObject>.Initialise)>]
+    [<HarmonyPostfix>]
+    static member public InitBubble(__instance: NewsItemObject) = MainClass.Instance.Game.NewBubble()
+
     [<HarmonyPatch(typeof<BonusObject>, "Update")>]
     [<HarmonyPostfix>]
     static member public BonusUpdate(__instance: BonusObject) =

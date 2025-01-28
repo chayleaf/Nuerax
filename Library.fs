@@ -180,7 +180,9 @@ type CountryOrWorldContext =
       // publicOrder * 100
       [<SkipSerializingIfEquals 0f>]
       [<RenameField "publicOrder%">]
-      publicOrderPercent: float32 }
+      publicOrderPercent: float32
+      [<SkipSerializingIfEquals 0>]
+      dnaPointsBonusForStartingHere: int }
 
 type Actions =
     | [<Action("nuke", "Nuke a country of your choice")>] Nuke of countryName: string
@@ -189,7 +191,9 @@ type Actions =
         countryName: string
     | [<Action("send_trojan_plane", "Send a trojan plane to infect a country of your choice")>] SendTrojanPlane of
         countryName: string
-    | [<Action("choose_start", "Choose your plague's starting country")>] ChooseStart of countryName: string
+    | [<Action("choose_start",
+               "Choose your plague's starting country. It determines your plague's initial fitness to various conditions.")>] ChooseStart of
+        countryName: string
     | [<Action("choose_plague", "Choose a plague to play as")>] ChoosePlague of plagueName: string
     | [<Action("choose_genes", "Choose genes for your plague")>] ChooseGenes of
         gene1: string option *
@@ -238,7 +242,8 @@ type Actions =
     | [<Action("focus_country",
                "Focus on a specific country. This will have no effect on gameplay, but you will start receiving live updates on that country's statistics. You can leave countryName null or empty to unfocus the country.")>] FocusCountry of
         countryName: string option
-    | [<Action("click_bubble", "Click on a bubble, which usually gives you some rewards")>] ClickBubble of
+    | [<Action("click_bubble",
+               "Click on a bubble, which usually gives you some rewards. It is always recommended to do this when you can.")>] ClickBubble of
         countryName: string *
         bubbleName: string
 
@@ -412,7 +417,8 @@ module Context =
           apeDeadPercent = perc d.apeTotalDeadPercent
           cureInvestmentDollars = d.globalCureResearch
           cureRequirementDollars = int d.cureRequirements
-          publicOrderPercent = 0f }
+          publicOrderPercent = 0f
+          dnaPointsBonusForStartingHere = 0 }
 
     let country (country: Country) : CountryOrWorldContext =
         let tag f s = if f country then [ s ] else []
@@ -475,7 +481,12 @@ module Context =
           cureInvestmentDollars = ld.localCureResearch
           cureRequirementDollars = 0
           publicOrderPercent = min 100f (perc country.publicOrder)
-          tags = Some tags }
+          tags = Some tags
+          dnaPointsBonusForStartingHere =
+            if CUIManager.instance.GetCurrentScreen() :? CCountrySelect then
+                country.startCountryEvoBonus
+            else
+                0 }
 
     let bubble (bubble: BonusObject) : BubbleCtx =
         let name, desc =
@@ -585,11 +596,138 @@ module Context =
             else
                 Some(country (CInterfaceManager.instance.SelectedCountryView.GetCountry())) }
 
+module Actions =
+    let map () =
+        typeof<CInterfaceManager>
+            .GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
+            .GetValue(CInterfaceManager.instance)
+        :?> Generic.IDictionary<string, CountryView>
+        |> Seq.map _.Value
+        |> Seq.toList
+
+    let countryNames () : string list =
+        map () |> List.map (_.GetCountry().name >> CLocalisationManager.GetText)
+
+    let nuke<'T> (game: Game<'T>) =
+        let act = game.Action Nuke
+        let names = countryNames () |> Array.ofList
+        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+        act
+
+    let sendTrojanPlane<'T> (game: Game<'T>) =
+        let act = game.Action SendTrojanPlane
+        let names = countryNames () |> Array.ofList
+        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+        act
+
+    let sendZombieHordeTo<'T> (game: Game<'T>) =
+        let act = game.Action SendZombieHordeTo
+        let names = countryNames () |> Array.ofList
+        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+        act
+
+    let choosePlague<'T> (game: Game<'T>) (ctx: PlagueCtx array) =
+        let act = game.Action ChoosePlague
+
+        act.MutateProp "plagueName" (fun x ->
+            (x :?> StringSchema).SetEnum(ctx |> Array.filter _.unlocked |> Array.map _.name))
+
+        act
+
+    let chooseGenes<'T> (game: Game<'T>) (c: GenesCtx) =
+        let act = game.Action ChooseGenes
+
+        let setProp x y =
+            act.MutateProp x (fun x ->
+                (x :?> StringSchema)
+                    .SetEnum(c |> y |> _.options |> List.filter _.unlocked |> List.map _.name |> Array.ofList))
+
+        setProp "gene1" _.gene1
+        setProp "gene2" _.gene2
+        setProp "gene3" _.gene3
+        setProp "gene4" _.gene4
+        setProp "gene5" _.gene5
+        act
+
+    let chooseStart<'T> (game: Game<'T>) =
+        let act = game.Action ChooseStart
+        let names = countryNames () |> Array.ofList
+        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+        act
+
+    let setGameSpeed<'T> (game: Game<'T>) =
+        let act = game.Action SetGameSpeed
+
+        act.MutateProp "speed" (fun x ->
+            let x = x :?> IntegerSchema
+            x.Minimum <- Some 0
+            x.Maximum <- Some 3)
+
+        act
+
+    let queryCountries<'T> (game: Game<'T>) =
+        let countries = map () |> List.map (_.GetCountry() >> Context.country)
+
+        let tags =
+            Set.ofSeq (countries |> Seq.collect (_.tags >> Option.defaultValue []))
+            |> Set.map game.Serialize
+
+        let i2l n x = if n > 0f then [ x ] else []
+
+        let sortBy =
+            Set.ofSeq (
+                countries
+                |> Seq.collect (fun x ->
+                    (i2l x.healthyPercent ``Healthy%``)
+                    @ (i2l x.infectedPercent ``Infected%``)
+                    @ (i2l x.deadPercent ``Dead%``)
+                    @ (i2l x.cureInvestmentDollars CureContribution)
+                    @ (i2l x.publicOrderPercent ``PublicOrder%``)
+                    @ (i2l x.zombiePercent ``Zombie%``)
+                    @ (i2l x.apeHealthyPercent ``ApeHealthy%``)
+                    @ (i2l x.apeInfectedPercent ``ApeInfected%``)
+                    @ (i2l x.apeDeadPercent ``ApeDead%``))
+            )
+            |> Set.map game.Serialize
+
+        let act = game.Action QueryCountries
+
+        act.MutateProp "tags" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(tags.Contains))
+        act.MutateProp "tagsNot" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(tags.Contains))
+        act.MutateProp "sortBy" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(sortBy.Contains))
+
+        act
+
+    let focusCountry<'T> (game: Game<'T>) =
+        let act = game.Action FocusCountry
+        let names = countryNames () |> Array.ofList
+        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+        act
+
+    let clickBubble<'T> (game: Game<'T>) (ctx: Context) : Action option =
+        ctx.bubbles
+        |> Option.map (fun bubbles ->
+            let act = game.Action ClickBubble
+
+            let countries =
+                bubbles
+                |> List.distinctBy _.countryName
+                |> List.map _.countryName
+                |> Array.ofList
+
+            let types =
+                bubbles |> List.distinctBy _.bubbleName |> List.map _.bubbleName |> Array.ofList
+
+            act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum countries)
+            act.MutateProp "bubbleName" (fun x -> (x :?> StringSchema).SetEnum types)
+            act)
+
 type Game(plugin: MainClass) =
     inherit Game<Actions>()
 
     let mutable forceActs: Action list option = None
     let mutable nextContextTime: DateTime = DateTime.MinValue
+    let mutable newBubble: bool = false
 
     let map () =
         typeof<CInterfaceManager>
@@ -605,6 +743,7 @@ type Game(plugin: MainClass) =
     override _.ReregisterActions() =
         forceActs <- None
         nextContextTime <- DateTime.MinValue
+        newBubble <- false
 
     override _.Name = "Plague Inc Evolved"
 
@@ -805,7 +944,7 @@ type Game(plugin: MainClass) =
                         CGameManager.SetPaused(true, true)
                         Ok(Some "You will now have to select the nuke target")
                     | x ->
-                        this.LogError $"Unknown HUD mode: {x}"
+                        this.LogError $"Unknown HUD mode after clicking bubble: {x}"
                         Ok None
                 | None ->
                     Error(Some $"Bubble not found! Available bubbles: {allBubbles |> List.map snd |> this.Serialize}")
@@ -958,8 +1097,9 @@ type Game(plugin: MainClass) =
 
                 this.LogDebug $"{Camera_Zoom.instance.IsScrolling} {allowI}"
                 nextContextTime <- DateTime.MinValue
+                newBubble <- false
                 screen.OnCountryClick(country, pos, true)
-                Ok None
+                Ok(Some "You will now have to click the `Country Select` bubble")
             | None -> Error(Some "This country doesn't exist!")
         | ClosePopup ->
             cur
@@ -1060,6 +1200,8 @@ type Game(plugin: MainClass) =
               ephemeral_context = ephemeral
               action_names = acts |> List.map _.Name }
 
+    member _.NewBubble() = newBubble <- true
+
     member this.News(text: string) =
         this.Context false $"Breaking news: {text}"
 
@@ -1121,12 +1263,7 @@ type Game(plugin: MainClass) =
 
                     if not (Array.isEmpty opts) then
                         let ctx = opts |> Array.map Context.disease
-                        let act = this.Action ChoosePlague
-
-                        act.MutateProp "plagueName" (fun x ->
-                            (x :?> StringSchema).SetEnum(ctx |> Array.filter _.unlocked |> Array.map _.name))
-
-                        this.DoForce true ctx "Please pick a plague to play as." [ act ]
+                        this.DoForce true ctx "Please pick a plague to play as." [ Actions.choosePlague this ctx ]
                 | Some("main", (:? CGSGeneSubScreen as x)) ->
                     let cats = x.geneTypeButtons |> Array.map _.category
 
@@ -1140,26 +1277,7 @@ type Game(plugin: MainClass) =
                               gene4 = ctx.[3]
                               gene5 = ctx.[4] }
 
-                        let act = this.Action ChooseGenes
-
-                        let setProp x y =
-                            act.MutateProp x (fun x ->
-                                (x :?> StringSchema)
-                                    .SetEnum(
-                                        c
-                                        |> y
-                                        |> _.options
-                                        |> List.filter _.unlocked
-                                        |> List.map _.name
-                                        |> Array.ofList
-                                    ))
-
-                        setProp "gene1" _.gene1
-                        setProp "gene2" _.gene2
-                        setProp "gene3" _.gene3
-                        setProp "gene4" _.gene4
-                        setProp "gene5" _.gene5
-                        this.DoForce true c "Please pick genes for your plague." [ act ]
+                        this.DoForce true c "Please pick genes for your plague." [ Actions.chooseGenes this c ]
                 | Some("main", (:? CGSDifficultySubScreen as x)) ->
                     // hardcode normal difficulty
                     x.ChooseDifficulty(x.buttons.[1], true)
@@ -1168,8 +1286,7 @@ type Game(plugin: MainClass) =
 
                     if iv <> "" && not x.setupComplete then
                         let c = { previousName = iv }
-                        let act = this.Action ChooseName
-                        this.DoForce true c "Please pick a name for your plague." [ act ]
+                        this.DoForce true c "Please pick a name for your plague." [ this.Action ChooseName ]
                 | Some(k, v) -> this.LogDebug $"CGS / {k} / {v.GetType().Name}"
                 | _ -> ()
             | "CCountrySelect" ->
@@ -1181,8 +1298,7 @@ type Game(plugin: MainClass) =
                         { title = x.title.text
                           description = x.description.text }
 
-                    let act = this.Action ClosePopup
-                    this.DoForce false ctx "Close the popup when you're ready to continue." [ act ]
+                    this.DoForce false ctx "Close the popup when you're ready to continue." [ this.Action ClosePopup ]
                 | Some(k, v) -> this.LogDebug $"CCS / {k} / {v.GetType().Name}"
                 | None ->
                     let ub =
@@ -1192,24 +1308,20 @@ type Game(plugin: MainClass) =
                         :?> BonusObject
 
                     if ub = null && CGameManager.localPlayerInfo.disease.nexus = null then
-                        let names = countryNames () |> Array.ofList
-                        let act = this.Action ChooseStart
-                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
-                        // screen.OnCountryClick()
-                        this.DoForce false "Starting country selection" "Please pick the starting country." [ act ]
+                        let ctx = Context.context ()
+
+                        this.DoForce
+                            false
+                            ctx
+                            "Please first pick the starting country and then click the start bubble to confirm your selection."
+                            ([ Actions.chooseStart this; Actions.queryCountries this ]
+                             @ Option.toList (Actions.clickBubble this ctx))
             | "CHUDScreen" ->
-                let sgs = this.Action SetGameSpeed
-
-                sgs.MutateProp "speed" (fun x ->
-                    let x = x :?> IntegerSchema
-                    x.Minimum <- Some 0
-                    x.Maximum <- Some 3)
-
-                let allActions =
-                    [ sgs
+                let allActions: Action list =
+                    [ Actions.setGameSpeed this
                       this.Action OpenEvolutionScreen
-                      this.Action QueryCountries
-                      this.Action FocusCountry ]
+                      Actions.queryCountries this
+                      Actions.focusCountry this ]
                     @ (cur
                        |> Seq.map (fun sub ->
                            match sub.Key, sub.Value with
@@ -1218,9 +1330,13 @@ type Game(plugin: MainClass) =
                                    { title = x.title.text
                                      description = x.description.text }
 
-                               let act = this.Action ClosePopup
-                               this.DoForce false ctx "Close the popup when you're ready to continue." [ act ]
-                               [ act ]
+                               this.DoForce
+                                   false
+                                   ctx
+                                   "Close the popup when you're ready to continue."
+                                   [ this.Action ClosePopup ]
+
+                               []
                            | "Context", (:? CHUDContextSubScreen) -> []
                            | "ability", (:? CHUDAbilitySubScreen) ->
                                // TODO active abilities
@@ -1230,7 +1346,6 @@ type Game(plugin: MainClass) =
                                [])
                        |> Seq.concat
                        |> List.ofSeq)
-                    |> List.map (fun x -> x :> obj)
 
                 if Option.isNone forceActs then
                     match CHUDScreen.instance.HudInterfaceMode with
@@ -1239,29 +1354,49 @@ type Game(plugin: MainClass) =
                         let d = CGameManager.localPlayerInfo.disease
                         let curDate = (DateTime World.instance.startDate).AddDays d.turnNumber
 
-                        if curDate >= nextContextTime then
-                            // send context every second
-                            nextContextTime <-
-                                curDate.AddDays(
-                                    match CGameManager.localPlayerInfo.gameSpeed with
-                                    | 0 -> 5
-                                    | x -> float (x * 5)
-                                )
+                        let allActions =
+                            if curDate >= nextContextTime || newBubble then
+                                newBubble <- true
+                                // send context every 5 seconds
+                                nextContextTime <-
+                                    curDate.AddDays(
+                                        match CGameManager.localPlayerInfo.gameSpeed with
+                                        | 0 -> 1
+                                        | x -> float (x * 5)
+                                    )
 
-                            let ctx = Context.context ()
-                            this.Context true (this.Serialize ctx)
+                                let ctx = Context.context ()
+                                this.Context true (this.Serialize ctx)
+                                (Option.toList (Actions.clickBubble this ctx)) @ allActions
+                            else
+                                (this.Action ClickBubble) :: allActions
+                            |> List.map (fun x -> x :> obj)
 
                         this.RetainActions allActions
                     | EHudMode.Neurax ->
-                        let names = countryNames () |> Array.ofList
-                        let act = this.Action SendTrojanPlane
-                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+                        CGameManager.SetPaused(true, true)
 
                         this.DoForce
                             true
                             None
                             "Please pick a destination for the trojan plane"
-                            [ act; this.Action QueryCountries ]
+                            [ Actions.sendTrojanPlane this; Actions.queryCountries this ]
+                    | EHudMode.NukeStrike ->
+                        CGameManager.SetPaused(true, true)
+
+                        this.DoForce
+                            true
+                            None
+                            "Please pick a destination for the nuke"
+                            [ Actions.nuke this; Actions.queryCountries this ]
+                    | EHudMode.SendHorde ->
+                        CGameManager.SetPaused(true, true)
+
+                        this.DoForce
+                            true
+                            None
+                            "Please pick a destination for the zombie horde"
+                            [ Actions.sendZombieHordeTo this; Actions.queryCountries this ]
                     | EHudMode.EconomicSupport
                     | EHudMode.RaisePriority
                     | EHudMode.SendInvestigationTeam
@@ -1288,26 +1423,6 @@ type Game(plugin: MainClass) =
                             "Invalid HUD mode, this should never happen! Active actions have to be triggered with the API"
 
                         CHUDScreen.instance.Default()
-                    | EHudMode.NukeStrike ->
-                        let names = countryNames () |> Array.ofList
-                        let act = this.Action Nuke
-                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
-
-                        this.DoForce
-                            true
-                            None
-                            "Please pick a destination for the nuke"
-                            [ act; this.Action QueryCountries ]
-                    | EHudMode.SendHorde ->
-                        let names = countryNames () |> Array.ofList
-                        let act = this.Action SendZombieHordeTo
-                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
-
-                        this.DoForce
-                            true
-                            None
-                            "Please pick a destination for the zombie horde"
-                            [ act; this.Action QueryCountries ]
                     | _ ->
                         this.LogError "Unknown HUD mode, resetting to default"
                         CHUDScreen.instance.Default()
