@@ -1,6 +1,6 @@
 ## Installation
 
-1. install [BepInEx](https://github.com/BepInEx/BepInEx)
+1. install [BepInEx 5](https://github.com/BepInEx/BepInEx)
 2. copy `Assembly-CSharp.dll` to `lib` (I'll publish a stripped down
    version some time later)
 3. `dotnet build`
