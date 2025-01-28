@@ -44,11 +44,11 @@ type TechCtx =
       [<SkipSerializingIfNone>]
       devolutionCost: int option
       [<SkipSerializingIfEquals 0>]
-      ``infectivityChange%``: int
+      ``globalInfectivityChange%``: int
       [<SkipSerializingIfEquals 0>]
-      ``severityChange%``: int
+      ``globalSeverityChange%``: int
       [<SkipSerializingIfEquals 0>]
-      ``lethalityChange%``: int
+      ``globalLethalityChange%``: int
     // i could specify the full exact changes, but i really don't feel like it
     // (plus it would give neuro more data than a human player, which isn't bad in itself,
     //  but it does give me an excue)
@@ -223,6 +223,9 @@ type PopupCtx = { title: string; description: string }
 
 type Context =
     { dnaPoints: int
+      ``globalInfectivity%``: int
+      ``globalSeverity%``: int
+      ``globalLethality%``: int
       inGameDate: string
       [<SkipSerializingIfNone>]
       tips: string list option
@@ -232,6 +235,9 @@ type Context =
 
 type TechScreenCtx =
     { dnaPoints: int
+      ``globalInfectivity%``: int
+      ``globalSeverity%``: int
+      ``globalLethality%``: int
       [<SkipSerializingIfNone>]
       transmissions: TechCtx list option
       [<SkipSerializingIfNone>]
@@ -294,19 +300,27 @@ module Context =
             | Technology.ETechType.ability -> None, None, Some name
             | _ -> None, None, None
 
-        let mkReq any all =
-            let proc x =
-                if Seq.isEmpty x then
-                    None
-                else
-                    Some(x |> Seq.map (fun x -> Map.find x techs |> techShort) |> List.ofSeq)
+        let mkReq isNot any all =
+            let proc x remove =
+                let ret =
+                    x
+                    |> Seq.filter (fun x -> not (Seq.contains x remove))
+                    |> Seq.map (fun x -> Map.find x techs |> techShort)
+                    |> List.ofSeq
 
-            if Seq.isEmpty any && Seq.isEmpty all then
-                None
+                if List.isEmpty ret then None else Some ret
+
+            // for removing redundancy
+            // for requirements: anything thats in all must be removed from any
+            // for not: anything in any must be removed from all
+            let ret =
+                { anyResearched = proc any (if isNot then Seq.empty else all)
+                  allResearched = proc all (if isNot then any else Seq.empty) }
+
+            if Option.isSome ret.anyResearched || Option.isSome ret.allResearched then
+                Some ret
             else
-                Some
-                    { anyResearched = proc any
-                      allResearched = proc all }
+                None
 
         let d = CGameManager.localPlayerInfo.disease
         let evolved = d.IsTechEvolved tech
@@ -315,16 +329,16 @@ module Context =
           symptomName = s
           abilityName = a
           description = CLocalisationManager.GetText tech.description
-          requires = mkReq tech.requiredTechOR tech.requiredTechAND
-          conflicts = mkReq tech.notTechOR tech.notTechAND
+          requires = mkReq false tech.requiredTechOR tech.requiredTechAND
+          conflicts = mkReq true tech.notTechOR tech.notTechAND
           evolved = evolved
           canEvolve = if evolved then None else Some(d.CanEvolve tech)
           canDevolve = if evolved then Some(d.CanDeEvolve tech) else None
           evolutionCost = if evolved then None else Some(d.GetEvolveCost tech)
           devolutionCost = if evolved then Some(d.GetDeEvolveCost tech) else None
-          ``infectivityChange%`` = int tech.changeToInfectiousness
-          ``severityChange%`` = int tech.changeToSeverity
-          ``lethalityChange%`` = int tech.changeToLethality }
+          ``globalInfectivityChange%`` = int tech.changeToInfectiousness
+          ``globalSeverityChange%`` = int tech.changeToSeverity
+          ``globalLethalityChange%`` = int tech.changeToLethality }
 
     let world () : CountryOrWorldContext =
         let d = CGameManager.localPlayerInfo.disease
@@ -424,6 +438,7 @@ module Context =
             |> Seq.map (tech techMap)
             |> Seq.filter (_.canEvolve >> Option.exists id)
             |> List.ofSeq
+            |> List.sortBy _.evolutionCost
 
         let cheapest =
             List.tryHead techs
@@ -439,12 +454,15 @@ module Context =
         let date = startDate.AddDays d.turnNumber
 
         { dnaPoints = d.evoPoints
+          ``globalInfectivity%`` = int d.globalInfectiousnessMax
+          ``globalSeverity%`` = int d.globalSeverityMax
+          ``globalLethality%`` = int d.globalLethalityMax
           inGameDate = $"{date:``yyyy-MM-dd``}"
           tips =
             let tips =
-                if d.evoPoints > mostExpensive then
+                if d.evoPoints >= mostExpensive then
                     [ "You have enough DNA points to evolve *anything* right now, it's heavily recommeded you open the evolution screen" ]
-                else if d.evoPoints > cheapest then
+                else if d.evoPoints >= cheapest then
                     [ "You have enough DNA points to evolve certain transmission vectors/symptoms/abilities for your plague" ]
                 else
                     []
@@ -463,7 +481,9 @@ type Game(plugin: MainClass) =
     let mutable forceActs: Action list option = None
     let mutable nextContextTime: DateTime = DateTime.MinValue
 
-    override _.ReregisterActions() = ()
+    override _.ReregisterActions() =
+        forceActs <- None
+        nextContextTime <- DateTime.MinValue
 
     override _.Name = "Plague Inc Evolved"
 
@@ -487,11 +507,30 @@ type Game(plugin: MainClass) =
 
         let d = CGameManager.localPlayerInfo.disease
 
-        let findTech f s t =
+        let findTech f s t w =
+            let sub = screen.GetSubScreen $"{w}_SubScreen" :?> CTechTreeSubScreen
             let techMap = d.technologies |> Seq.map (fun x -> x.id, x) |> Map.ofSeq
 
             match d.technologies |> Seq.tryFind (Context.tech techMap >> f >> (=) (Some s)) with
-            | Some x -> Ok x
+            | Some tech ->
+                let hex =
+                    typeof<CTechTreeSubScreen>
+                        .GetField("hexes", BindingFlags.NonPublic ||| BindingFlags.Instance)
+                        .GetValue(sub)
+                    :?> Generic.IDictionary<int, TechHex>
+                    |> _.Values
+                    |> Seq.filter _.visible
+                    |> Seq.map (fun x ->
+                        x,
+                        typeof<TechHex>
+                            .GetField("technology", BindingFlags.NonPublic ||| BindingFlags.Instance)
+                            .GetValue(x)
+                        :?> Technology)
+                    |> Seq.tryFind (snd >> (=) tech)
+
+                match hex with
+                | Some hex -> Ok(tech, fst hex, sub)
+                | None -> Error(Some "Internal error, couldn't find the tech hex, this might not be evolvable")
             | None ->
                 let opts =
                     d.technologies
@@ -500,13 +539,16 @@ type Game(plugin: MainClass) =
 
                 Error(Some $"{t} named {this.Serialize s} was not found, available options: {this.Serialize opts}")
 
-        let evolve (tech: Technology) =
+        let evolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
             if d.IsTechEvolved tech then
                 Error(Some "This is already evolved!")
             elif d.GetEvolveCost tech > d.evoPoints then
                 Error(Some $"This costs {d.GetEvolveCost tech} DNA points, while you only have {d.evoPoints} points!")
             elif d.CanEvolve tech then
-                d.EvolveTech(tech, false)
+                let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
+                screen.EvolveDisease(hex, tech, false, CGameManager.localPlayerInfo.disease.evoPointsSpent)
+                CGameManager.game.EvolveTech(tech) |> ignore
+                sub.TechSelected(tech, hex)
                 Ok None
             elif tech.eventLocked then
                 Error(Some "This is currently locked and can't be evolved")
@@ -549,7 +591,7 @@ type Game(plugin: MainClass) =
 
                 Error(Some $"The tech can't be researched because some of the prerequisites were not met: {text}")
 
-        let devolve (tech: Technology) =
+        let devolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
             if not (d.IsTechEvolved tech) then
                 Error(Some "This is not yet evolved!")
             elif d.GetDeEvolveCost tech > d.evoPoints then
@@ -558,7 +600,12 @@ type Game(plugin: MainClass) =
                         $"Deevolving this costs {d.GetDeEvolveCost tech} DNA points, while you only have {d.evoPoints} points!"
                 )
             elif d.CanDeEvolve tech then
+                let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
+                screen.EvolveDisease(hex, tech, false, CGameManager.localPlayerInfo.disease.evoPointsSpent)
                 d.DeEvolveTech(tech, false)
+                CGameManager.game.DeEvolveTech(tech) |> ignore
+                screen.PreviewTechDevolve null
+                sub.TechSelected(tech, hex)
                 Ok None
             else
                 Error(Some "This can't be devolved!")
@@ -575,26 +622,26 @@ type Game(plugin: MainClass) =
 
             Ok None
         | OpenTransmissionScreen ->
-            let screen = CUIManager.instance.GetScreen("DiseaseScreen") :?> CDiseaseScreen
+            let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[1].value <- true
             Ok None
         | OpenSymptomsScreen ->
-            let screen = CUIManager.instance.GetScreen("DiseaseScreen") :?> CDiseaseScreen
+            let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[2].value <- true
             Ok None
         | OpenAbilitiesScreen ->
-            let screen = CUIManager.instance.GetScreen("DiseaseScreen") :?> CDiseaseScreen
+            let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[3].value <- true
             Ok None
-        | EvolveAbility abilityName -> findTech _.abilityName abilityName "Ability" |> Result.bind evolve
-        | EvolveSymptom symptomName -> findTech _.symptomName symptomName "Symptom" |> Result.bind evolve
+        | EvolveAbility abilityName -> findTech _.abilityName abilityName "Ability" "Abilities" |> Result.bind evolve
+        | EvolveSymptom symptomName -> findTech _.symptomName symptomName "Symptom" "Symptoms" |> Result.bind evolve
         | EvolveTransmission transmissionName ->
-            findTech _.transmissionName transmissionName "Transmission"
+            findTech _.transmissionName transmissionName "Transmission" "Transmission"
             |> Result.bind evolve
-        | DevolveAbility abilityName -> findTech _.abilityName abilityName "Ability" |> Result.bind devolve
-        | DevolveSymptom symptomName -> findTech _.symptomName symptomName "Symptom" |> Result.bind devolve
+        | DevolveAbility abilityName -> findTech _.abilityName abilityName "Ability" "Abilities" |> Result.bind devolve
+        | DevolveSymptom symptomName -> findTech _.symptomName symptomName "Symptom" "Symptoms" |> Result.bind devolve
         | DevolveTransmission transmissionName ->
-            findTech _.transmissionName transmissionName "Transmission"
+            findTech _.transmissionName transmissionName "Transmission" "Transmission"
             |> Result.bind devolve
         | CloseEvolutionScreen ->
             CUIManager.instance.HideOverlay "Red_Confirm_Overlay_Devolve"
@@ -804,6 +851,7 @@ type Game(plugin: MainClass) =
         plugin.Logger.LogInfo $"{DateTime.UtcNow}.{DateTime.UtcNow.ToString(fff)} {error}"
 
     member this.DoForce<'T> (ephemeral: bool) (ctx: 'T) (prompt: string) (acts: Action list) =
+        let acts = acts |> List.filter _.Valid
         forceActs <- Some acts
 
         this.RetainActions(acts |> List.map (fun x -> x))
@@ -1003,8 +1051,15 @@ type Game(plugin: MainClass) =
                     let d = CGameManager.localPlayerInfo.disease
                     let curDate = (DateTime World.instance.startDate).AddDays d.turnNumber
 
-                    if curDate > nextContextTime then
-                        nextContextTime <- curDate.AddDays 1
+                    if curDate >= nextContextTime then
+                        // send context every second
+                        nextContextTime <-
+                            curDate.AddDays(
+                                match CGameManager.localPlayerInfo.gameSpeed with
+                                | 0 -> 1
+                                | x -> x
+                            )
+
                         let ctx = Context.context ()
                         this.Context true (this.Serialize ctx)
 
@@ -1058,6 +1113,7 @@ type Game(plugin: MainClass) =
                                   .SetEnum(
                                       techs
                                       |> List.filter (_.canEvolve >> Option.exists id)
+                                      |> List.filter (_.evolutionCost.Value >> (>=) d.evoPoints)
                                       |> List.collect (nameFn >> Option.toList)
                                       |> Array.ofList
                                   ))
@@ -1073,6 +1129,7 @@ type Game(plugin: MainClass) =
                                   .SetEnum(
                                       techs
                                       |> List.filter (_.canDevolve >> Option.exists id)
+                                      |> List.filter (_.devolutionCost.Value >> (>=) d.evoPoints)
                                       |> List.collect (nameFn >> Option.toList)
                                       |> Array.ofList
                                   ))
@@ -1082,6 +1139,9 @@ type Game(plugin: MainClass) =
 
                 let ctx =
                     { dnaPoints = d.evoPoints
+                      ``globalInfectivity%`` = int d.globalInfectiousnessMax
+                      ``globalSeverity%`` = int d.globalSeverityMax
+                      ``globalLethality%`` = int d.globalLethalityMax
                       transmissions = if tab = 1 then Some techs else None
                       symptoms = if tab = 2 then Some techs else None
                       abilities = if tab = 3 then Some techs else None }
