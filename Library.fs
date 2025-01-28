@@ -1175,7 +1175,7 @@ type Game(plugin: MainClass) =
 
                     $"{won} {title} - {desc}" |> this.Context false
 
-                this.RetainActions [ this.Action CloseEvolutionScreen ]
+                this.RetainActions [ this.Action CloseGameEndScreen ]
             | k -> this.LogDebug $"UnkScreen {k}"
 
 and [<BepInPlugin("org.pavluk.nuerax", "Nuerax", "1.0.0")>] MainClass() =
