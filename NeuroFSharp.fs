@@ -29,7 +29,7 @@ open FSharp.Reflection
 [<assembly: InternalsVisibleTo("NeuroShogunTests")>]
 do ()
 
-type UnionAttr internal () =
+type UnionAttr() =
     inherit Attribute()
 
     abstract member TagName: string option
@@ -40,12 +40,27 @@ type TagName(name: string) =
 
     override _.TagName = Some(name)
 
-type FieldAttr internal () =
+type CaseAttr() =
+    inherit Attribute()
+
+    abstract member MapFieldNames: (string * string) list
+    default _.MapFieldNames = []
+
+// a hack for union case fields not supporting attributes in F#
+// this is very limited, only to be used for action deserialization purposes
+type RenameCaseField(from: string, ``to``: string) =
+    inherit CaseAttr()
+
+    override _.MapFieldNames = [ from, ``to`` ]
+
+type FieldAttr() =
     inherit Attribute()
 
     abstract member Serialized: name: string -> value: obj -> serialized: Lazy<JsonValue> -> (string * JsonValue) list
+    abstract member ExtraDeserializationNames: string list
 
     default _.Serialized name _ serialized = [ (name, serialized.Value) ]
+    default _.ExtraDeserializationNames = []
 
 type SkipSerializingIfEquals(x: obj) =
     inherit FieldAttr()
@@ -69,6 +84,7 @@ type RenameField(name: string) =
     inherit FieldAttr()
 
     override _.Serialized _ _ serialized = [ (name, serialized.Value) ]
+    override _.ExtraDeserializationNames = [ name ]
 
 type internal TypeInfo' =
     | Record of Property array * Attribute array
@@ -447,6 +463,12 @@ type Action(name: string, description: string) =
     let mutable schema1: ObjectSchema option = None
     let mutable desc = description
 
+    abstract member Name: string
+    abstract member MutableName: bool
+    abstract member Description: string with get, set
+    abstract member Schema: ObjectSchema option with get, set
+    abstract member Clone: unit -> Action
+
     interface ISerializable with
         override this.JsonValue() : JsonValue =
             JsonValue.Record(
@@ -460,34 +482,35 @@ type Action(name: string, description: string) =
                        ("schema", schema.JsonValue()) |]
             )
 
-    member _.Valid = not (schema |> Option.exists (_.Valid >> not))
-    member _.Name = name
+    member this.Valid = not (this.Schema |> Option.exists (_.Valid >> not))
+    default _.Name = name
+    default this.MutableName = this.GetType() <> typeof<Action>
     member _.InitialDescription = description
 
-    member _.Clone() : Action =
-        let mutable ret = new Action(name, description)
-        ret.Description <- desc
-        ret.InitialSchema <- (schema1 |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
-        ret.Schema <- (schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
-        ret
-
-    member _.EqualTo(other: Action) =
-        name = other.Name
-        && desc = other.Description
-        && (Option.isNone schema && Option.isNone other.Schema
-            || Option.defaultValue false ((schema |> Option.map2 (fun a b -> a.EqualTo(b))) other.Schema))
+    member this.EqualTo(other: Action) =
+        this.Name = other.Name
+        && this.Description = other.Description
+        && (Option.isNone this.Schema && Option.isNone other.Schema
+            || Option.defaultValue false ((this.Schema |> Option.map2 (fun a b -> a.EqualTo(b))) other.Schema))
 
     member _.InitialSchema
         with get () = schema1
         and set (value: ObjectSchema option) = schema1 <- value
 
-    member _.Description
+    default this.Clone() =
+        let mutable ret = Action(this.Name, this.InitialDescription)
+        ret.Description <- this.Description
+        ret.InitialSchema <- (this.InitialSchema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
+        ret.Schema <- (this.Schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
+        ret
+
+    default _.Description
         with get () = desc
         and set value =
             if desc <> value then
                 desc <- value
 
-    member _.Schema
+    default _.Schema
         with get () = schema
         and set (value: ObjectSchema option) = schema <- value
 
@@ -717,24 +740,36 @@ module internal TypeInfo =
         | PrimitiveInt
         | PrimitiveFloat -> raise (Exception "not supposed to happen")
 
-    let rec readProps (path: JsonPath) props jsonProps =
+    let rec readProps (nameMap: Map<string, string>) (path: JsonPath) props jsonProps =
         let src = Map.ofArray jsonProps
 
         let (res, state) =
             Ok()
             |> Array.mapFoldBack
-                (fun prop state ->
+                (fun (prop: Property) state ->
+                    let fieldNames =
+                        prop.attrs
+                        |> Array.collect (function
+                            | :? FieldAttr as x -> Array.ofList x.ExtraDeserializationNames
+                            | _ -> Array.empty)
+                        |> Array.append (Map.tryFind prop.propName nameMap |> Option.toArray)
+                        |> Array.append [| prop.propName |]
+                        |> Array.rev
+
                     match state with
                     | Ok() ->
-                        match src.TryFind prop.propName with
-                        | Some x ->
-                            match deserialize (Prop prop.propName :: path) prop.ty x with
+                        match
+                            fieldNames
+                            |> Array.tryPick (fun x -> Map.tryFind x src |> Option.map (fun w -> x, w))
+                        with
+                        | Some(name, x) ->
+                            match deserialize (Prop name :: path) prop.ty x with
                             | Ok x -> (x, Ok())
                             | Error err -> (null, Error(err))
                         | None ->
                             match fillMissing prop.ty with
                             | Some x -> (x, Ok())
-                            | None -> (null, Error(DeserError.missingField (Prop prop.propName :: path)))
+                            | None -> (null, Error(DeserError.missingField (Prop(Array.head fieldNames) :: path)))
                     | Error _ -> (null, state))
                 props
 
@@ -780,18 +815,25 @@ module internal TypeInfo =
                 | Some x when x.props.Length = 0 -> Ok(FSharpValue.MakeUnion(x.info, Array.empty))
                 | Some _ -> Error(DeserError.caseData path)
                 | None -> Error(DeserError.case name (info |> Array.map _.caseName) path)
-            | (Union(info, _), JsonValue.Record y) ->
+            | (Union(info, attrs), JsonValue.Record y) ->
+                let fieldMap =
+                    attrs
+                    |> Array.collect (function
+                        | :? CaseAttr as x -> Array.ofList x.MapFieldNames
+                        | _ -> [||])
+                    |> Map.ofArray
+
                 match y |> Array.tryFind (fst >> (=) "command") with
                 | Some(_, JsonValue.String name) ->
                     match info |> Array.tryFind (_.caseName >> (=) name) with
                     | Some x ->
-                        let res = readProps path x.props y
+                        let res = readProps fieldMap path x.props y
                         Result.map (fun res -> FSharpValue.MakeUnion(x.info, res)) res
                     | None -> Error(DeserError.case name (info |> Array.map _.caseName) path)
                 | Some(_, x) -> Error(DeserError.unexpected x "string" (Prop "command" :: path))
                 | None -> Error(DeserError.missingField (Prop "command" :: path))
             | (Record(props, _), JsonValue.Record y) ->
-                let res = readProps path props y
+                let res = readProps Map.empty path props y
 
                 Result.map (fun res -> FSharpValue.MakeRecord(ty, res)) res
             | (Enum(info, _), JsonValue.String name) ->
@@ -851,8 +893,16 @@ module internal TypeInfo =
         : Result<obj option, DeserError> =
         match info |> Array.tryFind (snd >> _.Name >> (=) name) with
         | Some(x, _) ->
+            let fieldMap =
+                x.attrs
+                |> Array.collect (function
+                    | :? CaseAttr as x -> Array.ofList x.MapFieldNames
+                    | _ -> [||])
+                |> Map.ofArray
+
             let res =
                 readProps
+                    fieldMap
                     []
                     x.props
                     (match obj with
@@ -936,8 +986,12 @@ type Game<'T>() =
              b)
         | _ -> raise (Exception("invalid actions type, must be a union"))
 
-    let actMap =
-        fst acts |> Array.map (fun (_, act) -> (act.Name, act)) |> Map.ofArray
+    let findActByName =
+        if fst acts |> Array.exists (snd >> _.MutableName) then
+            (fun s -> fst acts |> Array.find (snd >> _.Name >> (=) s) |> snd)
+        else
+            let actMap = fst acts |> Array.map (fun (_, act) -> (act.Name, act)) |> Map.ofArray
+            (fun s -> Map.find s actMap)
 
     let tagMap =
         fst acts |> Array.map (fun (case, act) -> (case.info.Tag, act)) |> Map.ofArray
@@ -948,7 +1002,7 @@ type Game<'T>() =
 
     let resolveAction (x: obj) : Action =
         match x with
-        | :? string as s -> Map.find s actMap
+        | :? string as s -> findActByName s
         | :? Action as act -> act
         | :? 'T as x -> Map.find (tagReader x) tagMap
         | x ->

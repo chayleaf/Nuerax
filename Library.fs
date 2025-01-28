@@ -8,6 +8,41 @@ open BepInEx.Logging
 open HarmonyLib
 open NeuroFSharp
 
+type CureAction(name: string, description: string, cureName: string, cureDescription: string) =
+    inherit Action(name, description)
+
+    override _.Name = if CGameManager.IsCureGame then cureName else name
+    override _.MutableName = true
+
+    override _.Description =
+        if CGameManager.IsCureGame then
+            cureDescription
+        else
+            description
+
+    override this.Clone() =
+        let mutable ret = CureAction(name, description, cureName, cureDescription)
+        ret.InitialSchema <- (this.InitialSchema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
+        ret.Schema <- (this.Schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
+        ret
+
+type CureField(cureName: string) =
+    inherit FieldAttr()
+
+    override _.Serialized _ _ serialized =
+        if CGameManager.IsCureGame then
+            [ (cureName, serialized.Value) ]
+        else
+            []
+
+    override _.ExtraDeserializationNames =
+        if CGameManager.IsCureGame then [ cureName ] else []
+
+type BubbleCtx =
+    { countryName: string
+      bubbleName: string
+      description: string }
+
 type ShortTechCtx =
     { [<SkipSerializingIfNone>]
       transmissionName: string option
@@ -137,8 +172,10 @@ type CountryOrWorldContext =
       zombiePercent: float32
       // localCureResearch
       [<SkipSerializingIfEquals 0f>]
+      [<RenameField "cureInvestment$">]
       cureInvestmentDollars: float32
       [<SkipSerializingIfEquals 0>]
+      [<RenameField "cureRequirement$">]
       cureRequirementDollars: int
       // publicOrder * 100
       [<SkipSerializingIfEquals 0f>]
@@ -146,6 +183,12 @@ type CountryOrWorldContext =
       publicOrderPercent: float32 }
 
 type Actions =
+    | [<Action("nuke", "Nuke a country of your choice")>] Nuke of countryName: string
+    // for free hordes *only*
+    | [<Action("send_zombie_horde_to", "Send a zombie horde to a country of your choice")>] SendZombieHordeTo of
+        countryName: string
+    | [<Action("send_trojan_plane", "Send a trojan plane to infect a country of your choice")>] SendTrojanPlane of
+        countryName: string
     | [<Action("choose_start", "Choose your plague's starting country")>] ChooseStart of countryName: string
     | [<Action("choose_plague", "Choose a plague to play as")>] ChoosePlague of plagueName: string
     | [<Action("choose_genes", "Choose genes for your plague")>] ChooseGenes of
@@ -195,6 +238,9 @@ type Actions =
     | [<Action("focus_country",
                "Focus on a specific country. This will have no effect on gameplay, but you will start receiving live updates on that country's statistics. You can leave countryName null or empty to unfocus the country.")>] FocusCountry of
         countryName: string option
+    | [<Action("click_bubble", "Click on a bubble, which usually gives you some rewards")>] ClickBubble of
+        countryName: string *
+        bubbleName: string
 
 type PlagueCtx =
     { name: string
@@ -227,6 +273,8 @@ type Context =
       ``globalSeverity%``: int
       ``globalLethality%``: int
       inGameDate: string
+      [<SkipSerializingIfNone>]
+      bubbles: BubbleCtx list option
       [<SkipSerializingIfNone>]
       tips: string list option
       world: CountryOrWorldContext
@@ -429,6 +477,40 @@ module Context =
           publicOrderPercent = min 100f (perc country.publicOrder)
           tags = Some tags }
 
+    let bubble (bubble: BonusObject) : BubbleCtx =
+        let name, desc =
+            match bubble.``type`` with
+            | BonusIcon.EBonusIconType.DNA -> "DNA", "Get bonus DNA"
+            | BonusIcon.EBonusIconType.CURE -> "Cure", "Slow down cure development"
+            // cure mode?
+            | BonusIcon.EBonusIconType.INFECT -> "First Infection", "Get bonus DNA"
+            | BonusIcon.EBonusIconType.DEATH -> "Death", "Get bonus DNA"
+            | BonusIcon.EBonusIconType.NEURAX -> "Neurax", "Send a plane to a country of your choice"
+            | BonusIcon.EBonusIconType.COUNTRY_SELECT ->
+                "Country Select", "Click this bubble to confirm starting country selection"
+            | BonusIcon.EBonusIconType.COUNTRY_SELECT_P2_INTENTION ->
+                "Country Select P2 Intention", "The other player intends to start here"
+            | BonusIcon.EBonusIconType.COUNTRY_SELECT_P2_SELECTED ->
+                "Country Select P2 Selected", "The other player will start here"
+            | BonusIcon.EBonusIconType.NECROA -> "Necroa", "Send a zombie horde to a country of your choice"
+            | BonusIcon.EBonusIconType.APE_COLONY -> "Ape Colony", ""
+            | BonusIcon.EBonusIconType.NEXUS_FOUND -> "Nexus Found", "Destroy the enemy nexus"
+            | BonusIcon.EBonusIconType.NEXUS_DNA -> "Nexus DNA", "Get DNA from your nexus"
+            | BonusIcon.EBonusIconType.DOUBLE_INFECTED_DNA -> "Double Infected DNA", "Get DNA for double infection"
+            | BonusIcon.EBonusIconType.NUKE -> "Nuke", "Nuke a country"
+            | BonusIcon.EBonusIconType.CASTLE -> "Lair", "Get DNA from your lair"
+            // cure mode
+            | BonusIcon.EBonusIconType.MEDICAL_SYSTEMS_OVERWHELMED -> "Medical Systems Overwhelmed", ""
+            // cure mode
+            | BonusIcon.EBonusIconType.DISEASE_ORIGIN_COUNTRY -> "Disease Origin Country", ""
+            // cure mode
+            | BonusIcon.EBonusIconType.DEADBUBBLE_FOR_CURE -> "Deaths", ""
+            | _ -> "???", "Get bonus points?"
+
+        { countryName = CLocalisationManager.GetText(bubble.mpCountry.GetCountry().name)
+          bubbleName = name
+          description = desc }
+
     let context () : Context =
         let d = CGameManager.localPlayerInfo.disease
         let techMap = d.technologies |> Seq.map (fun x -> x.id, x) |> Map.ofSeq
@@ -453,11 +535,35 @@ module Context =
         let startDate = DateTime World.instance.startDate
         let date = startDate.AddDays d.turnNumber
 
+        let ub =
+            typeof<CInterfaceManager>
+                .GetField("mpUserBubble", BindingFlags.NonPublic ||| BindingFlags.Instance)
+                .GetValue(CInterfaceManager.instance)
+            :?> BonusObject
+
+        let bubbles =
+            (CInterfaceManager.instance.mpBonuses |> List.ofSeq)
+            @ if ub = null then [] else [ ub ]
+            |> List.filter (fun bubble ->
+                let getBool name =
+                    typeof<BonusObject>
+                        .GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance)
+                        .GetValue(bubble)
+                    :?> bool
+
+                not (getBool "mbUnclickable")
+                && not (getBool "mbBlocked")
+                && not (getBool "mbClicked")
+                && not (getBool "mbDead")
+                && bubble.isVisible)
+            |> List.map bubble
+
         { dnaPoints = d.evoPoints
           ``globalInfectivity%`` = int d.globalInfectiousnessMax
           ``globalSeverity%`` = int d.globalSeverityMax
           ``globalLethality%`` = int d.globalLethalityMax
           inGameDate = $"{date:``yyyy-MM-dd``}"
+          bubbles = if List.isEmpty bubbles then None else Some bubbles
           tips =
             let tips =
                 if d.evoPoints >= mostExpensive then
@@ -466,6 +572,10 @@ module Context =
                     [ "You have enough DNA points to evolve certain transmission vectors/symptoms/abilities for your plague" ]
                 else
                     []
+                @ (if List.isEmpty bubbles then
+                       []
+                   else
+                       [ "You have bubbles available to click, it's heavily recommended you do so to claim some rewards. If you find the amount of bubbles overwhelming, consider lowering game speed." ])
 
             if List.isEmpty tips then None else Some tips
           world = world ()
@@ -480,6 +590,17 @@ type Game(plugin: MainClass) =
 
     let mutable forceActs: Action list option = None
     let mutable nextContextTime: DateTime = DateTime.MinValue
+
+    let map () =
+        typeof<CInterfaceManager>
+            .GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
+            .GetValue(CInterfaceManager.instance)
+        :?> Generic.IDictionary<string, CountryView>
+        |> Seq.map _.Value
+        |> Seq.toList
+
+    let countryNames () : string list =
+        map () |> List.map (_.GetCountry().name >> CLocalisationManager.GetText)
 
     override _.ReregisterActions() =
         forceActs <- None
@@ -496,14 +617,6 @@ type Game(plugin: MainClass) =
                 .GetValue(screen)
             :?> Generic.IDictionary<string, IGameSubScreen>
             |> List.ofSeq
-
-        let map () =
-            typeof<CInterfaceManager>
-                .GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                .GetValue(CInterfaceManager.instance)
-            :?> Generic.IDictionary<string, CountryView>
-            |> Seq.map _.Value
-            |> Seq.toList
 
         let d = CGameManager.localPlayerInfo.disease
 
@@ -610,7 +723,92 @@ type Game(plugin: MainClass) =
             else
                 Error(Some "This can't be devolved!")
 
+        let useDifferentTargetAction act hudMode countryName =
+            if CHUDScreen.instance.HudInterfaceMode = hudMode then
+                match
+                    map ()
+                    |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
+                with
+                | Some country when CInterfaceManager.instance.mpTargetBubbleStart = country ->
+                    Error(Some "The target country can't be the same as the source country")
+                | Some country ->
+                    let screen = CUIManager.instance.GetCurrentScreen() :?> BaseMapScreen
+                    let pos = country.GetRandomPositionInsideCountry()
+                    screen.OnCountryHover(country, pos)
+                    screen.OnCountryClick(country, pos, true)
+                    CGameManager.SetPaused(false, true)
+                    // fallback in case the above fails for some reason
+                    CHUDScreen.instance.Default()
+                    Ok None
+                | None -> Error(Some "This country doesn't exist!")
+            elif forceActs |> Option.exists (List.exists (_.Name >> (=) (this.Action act).Name)) then
+                // send ok to prevent retrying
+                CGameManager.SetPaused(false, true)
+                Ok(Some "Error: this can't be done anymore for some reason")
+            else
+                Error(Some "This can't be done anymore")
+
         match action with
+        | Nuke countryName -> useDifferentTargetAction Nuke EHudMode.NukeStrike countryName
+        | SendTrojanPlane countryName -> useDifferentTargetAction SendTrojanPlane EHudMode.Neurax countryName
+        | SendZombieHordeTo countryName -> useDifferentTargetAction SendZombieHordeTo EHudMode.SendHorde countryName
+        | ClickBubble(countryName, bubbleName) ->
+            let ub =
+                typeof<CInterfaceManager>
+                    .GetField("mpUserBubble", BindingFlags.NonPublic ||| BindingFlags.Instance)
+                    .GetValue(CInterfaceManager.instance)
+                :?> BonusObject
+
+            let allBubbles =
+                (CInterfaceManager.instance.mpBonuses |> List.ofSeq)
+                @ if ub = null then [] else [ ub ]
+                |> List.filter (fun bubble ->
+                    let getBool name =
+                        typeof<BonusObject>
+                            .GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance)
+                            .GetValue(bubble)
+                        :?> bool
+
+                    not (getBool "mbUnclickable")
+                    && not (getBool "mbBlocked")
+                    && not (getBool "mbClicked")
+                    && not (getBool "mbDead")
+                    && bubble.isVisible)
+                |> List.map (fun bubble -> bubble, Context.bubble bubble)
+
+            if
+                not (CInterfaceManager.instance.CanClickBubble())
+                || CUIManager.instance.IsHovering()
+                || CGameManager.game.CurrentGameState = IGame.GameState.EndGame
+            then
+                Error(Some "You can't currently click bubbles")
+            elif List.isEmpty allBubbles then
+                Error(Some "There aren't any bubbles to click")
+            else
+                match
+                    allBubbles
+                    |> List.tryFind (snd >> (fun x -> x.bubbleName = bubbleName && x.countryName = countryName))
+                with
+                | Some(bubble, _) ->
+                    UICamera.hoveredObject <- null
+                    bubble.OnMouseDown()
+
+                    match CHUDScreen.instance.HudInterfaceMode with
+                    | EHudMode.Normal -> Ok None
+                    | EHudMode.Neurax ->
+                        CGameManager.SetPaused(true, true)
+                        Ok(Some "You will now have to select the infected plane destination")
+                    | EHudMode.SendHorde ->
+                        CGameManager.SetPaused(true, true)
+                        Ok(Some "You will now have to select the zombie horde destination")
+                    | EHudMode.NukeStrike ->
+                        CGameManager.SetPaused(true, true)
+                        Ok(Some "You will now have to select the nuke target")
+                    | x ->
+                        this.LogError $"Unknown HUD mode: {x}"
+                        Ok None
+                | None ->
+                    Error(Some $"Bubble not found! Available bubbles: {allBubbles |> List.map snd |> this.Serialize}")
         | CloseGameEndScreen ->
             let mutable over = false
 
@@ -987,12 +1185,6 @@ type Game(plugin: MainClass) =
                     this.DoForce false ctx "Close the popup when you're ready to continue." [ act ]
                 | Some(k, v) -> this.LogDebug $"CCS / {k} / {v.GetType().Name}"
                 | None ->
-                    let map =
-                        typeof<CInterfaceManager>
-                            .GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                            .GetValue(CInterfaceManager.instance)
-                        :?> Generic.IDictionary<string, CountryView>
-
                     let ub =
                         typeof<CInterfaceManager>
                             .GetField("mpUserBubble", BindingFlags.NonPublic ||| BindingFlags.Instance)
@@ -1000,14 +1192,7 @@ type Game(plugin: MainClass) =
                         :?> BonusObject
 
                     if ub = null && CGameManager.localPlayerInfo.disease.nexus = null then
-                        let names =
-                            map
-                            |> Seq.map (fun x -> x.Key, x.Value)
-                            |> Seq.map (fun (_, v) ->
-                                let c = v.GetCountry()
-                                CLocalisationManager.GetText c.name)
-                            |> Array.ofSeq
-
+                        let names = countryNames () |> Array.ofList
                         let act = this.Action ChooseStart
                         act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
                         // screen.OnCountryClick()
@@ -1048,22 +1233,86 @@ type Game(plugin: MainClass) =
                     |> List.map (fun x -> x :> obj)
 
                 if Option.isNone forceActs then
-                    let d = CGameManager.localPlayerInfo.disease
-                    let curDate = (DateTime World.instance.startDate).AddDays d.turnNumber
+                    match CHUDScreen.instance.HudInterfaceMode with
+                    | EHudMode.Disabled -> ()
+                    | EHudMode.Normal ->
+                        let d = CGameManager.localPlayerInfo.disease
+                        let curDate = (DateTime World.instance.startDate).AddDays d.turnNumber
 
-                    if curDate >= nextContextTime then
-                        // send context every second
-                        nextContextTime <-
-                            curDate.AddDays(
-                                match CGameManager.localPlayerInfo.gameSpeed with
-                                | 0 -> 1
-                                | x -> x
-                            )
+                        if curDate >= nextContextTime then
+                            // send context every second
+                            nextContextTime <-
+                                curDate.AddDays(
+                                    match CGameManager.localPlayerInfo.gameSpeed with
+                                    | 0 -> 5
+                                    | x -> float (x * 5)
+                                )
 
-                        let ctx = Context.context ()
-                        this.Context true (this.Serialize ctx)
+                            let ctx = Context.context ()
+                            this.Context true (this.Serialize ctx)
 
-                    this.RetainActions allActions
+                        this.RetainActions allActions
+                    | EHudMode.Neurax ->
+                        let names = countryNames () |> Array.ofList
+                        let act = this.Action SendTrojanPlane
+                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+
+                        this.DoForce
+                            true
+                            None
+                            "Please pick a destination for the trojan plane"
+                            [ act; this.Action QueryCountries ]
+                    | EHudMode.EconomicSupport
+                    | EHudMode.RaisePriority
+                    | EHudMode.SendInvestigationTeam
+                    | EHudMode.CreateCastle
+                    | EHudMode.SendVampire
+                    | EHudMode.SelectVampire
+                    | EHudMode.BloodRage
+                    | EHudMode.LethalBoost
+                    | EHudMode.InfectBoost
+                    | EHudMode.BenignMimic
+                    | EHudMode.ImmuneShock
+                    | EHudMode.SendUnscheduledFlight
+                    | EHudMode.SelectUnscheduledFlight
+                    | EHudMode.MoveGem
+                    | EHudMode.PlaceGem
+                    | EHudMode.ApeCreateColony
+                    | EHudMode.SendApeColony
+                    | EHudMode.SendApeHorde
+                    | EHudMode.SelectApeHorde
+                    | EHudMode.ApeRampage
+                    | EHudMode.SelectHorde
+                    | EHudMode.Reanimate ->
+                        this.LogError
+                            "Invalid HUD mode, this should never happen! Active actions have to be triggered with the API"
+
+                        CHUDScreen.instance.Default()
+                    | EHudMode.NukeStrike ->
+                        let names = countryNames () |> Array.ofList
+                        let act = this.Action Nuke
+                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+
+                        this.DoForce
+                            true
+                            None
+                            "Please pick a destination for the nuke"
+                            [ act; this.Action QueryCountries ]
+                    | EHudMode.SendHorde ->
+                        let names = countryNames () |> Array.ofList
+                        let act = this.Action SendZombieHordeTo
+                        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+
+                        this.DoForce
+                            true
+                            None
+                            "Please pick a destination for the zombie horde"
+                            [ act; this.Action QueryCountries ]
+                    | _ ->
+                        this.LogError "Unknown HUD mode, resetting to default"
+                        CHUDScreen.instance.Default()
+
+
             | "CDiseaseScreen" ->
                 let screen = screen :?> CDiseaseScreen
 

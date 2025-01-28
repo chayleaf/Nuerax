@@ -1,14 +1,17 @@
 namespace Nuerax
 
-open System
 open System.Reflection
 open HarmonyLib
 
 [<HarmonyPatch>]
 type public Patches() =
+    static let autoClick = false
+
     [<HarmonyPatch(typeof<BonusObject>, "Update")>]
     [<HarmonyPostfix>]
-    static member public BonusUpdate(__instance: BonusObject) = __instance.OnMouseDown()
+    static member public BonusUpdate(__instance: BonusObject) =
+        if autoClick then
+            __instance.OnMouseDown()
 
     [<HarmonyPatch(typeof<NewsItemObject>, nameof Unchecked.defaultof<NewsItemObject>.SetNewsItem)>]
     [<HarmonyPostfix>]
@@ -25,7 +28,8 @@ type public Patches() =
     [<HarmonyPatch(typeof<SPDisease>, nameof Unchecked.defaultof<SPDisease>.OnBonusIconClicked)>]
     [<HarmonyPostfix>]
     static member public BonusClicked(bonusIcon: BonusIcon) =
-        MainClass.Instance.Game.BubblePopped bonusIcon
+        if autoClick then
+            MainClass.Instance.Game.BubblePopped bonusIcon
 (*
     [<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetDiseaseUnlocked)>]
     [<HarmonyPostfix>]
