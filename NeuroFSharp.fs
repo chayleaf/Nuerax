@@ -1048,7 +1048,7 @@ type Game<'T>() =
                                 Error(Some $"Unknown action name: {name}, expected one of: \"{names}\"")
                             | Error(err) -> Error(Some $"Invalid action data: {err}")
                         with exc ->
-                            log $"${exc}"
+                            log $"{exc}"
                             Error(Some $"Unhandled exception: {exc.Message}"))
 
                 mp.Value.Post(
