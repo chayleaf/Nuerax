@@ -185,6 +185,52 @@ type CountryOrWorldContext =
       dnaPointsBonusForStartingHere: int }
 
 type Actions =
+    | [<Action("reanimate",
+               "Cellular regeneration makes some dead zombies rise again. Target country must have dead within.")>] Reanimate of
+        countryName: string
+    | [<Action("send_zombie_horde",
+               "Gather a horde of zombies to send to another country. Start country must have zombies in.")>] ZombieHorde of
+        sourceCountryName: string *
+        destinationCountryName: string
+    | [<Action("ape_rampage",
+               "Intelligent apes come together to build a community, rescue others and protect themselves.")>] Rampage of
+        countryName: string
+    | [<Action("ape_travel", "Intelligent apes leave their homes and move to a new location.")>] ApeTravel of
+        sourceCountryName: string *
+        destinationCountryName: string
+    | [<Action("create_colony",
+               "Intelligent apes come together to build a community, rescue others and protect themselves.")>] CreateColony of
+        countryName: string
+    | [<Action("unscheduled_flight",
+               "Infected people travel to another country. Can only be sent from a country with at least 1,000 infected population.")>] UnscheduledFlight of
+        sourceCountryName: string *
+        destinationCountryName: string
+    | [<Action("immune_shock",
+               "Increase your infectivity and make it significantly easier to kill people infected by both diseases in a target country.")>] ImmuneShock of
+        countryName: string
+    | [<Action("benign_mimic",
+               "Target country gains significant boost to research of opponent's disease. Target must be fully infected and your disease goes dormant there.")>] BenignMimic of
+        countryName: string
+    | [<Action("infect_boost", "Increase infectivity of both diseases in a target country.")>] InfectBoost of
+        countryName: string
+    | [<Action("lethal_boost", "Increase lethality of both diseases in a target country.")>] LethalBoost of
+        countryName: string
+    | [<Action("toggle_blood_rage",
+               "Vampire attacks research/military facilities if present, otherwise goes on killing spree to get DNA.")>] ToggleBloodRage of
+        countryName: string
+    | [<Action("vampire_flight", "Send a vampire to another country.")>] VampireFlight of
+        sourceCountryName: string *
+        destinationCountryName: string
+    | [<Action("create_lair",
+               "Create a lair for the vampire to heal in. Also generates DNA based on infected population.")>] CreateLair of
+        countryName: string
+    | [<Action("field_operatives", "Send the Field Operatives to a target country.")>] FieldOperatives of
+        countryName: string
+    | [<Action("targeted_quarantine", "Force a target country to shut border connections and lock down for 1 month.")>] TargetedQuarantine of
+        countryName: string
+    | [<Action("targeted_economic_aid",
+               "Send significant financial aid package to help a country struggling with Quarantine measures. Decrease Non-Compliance in target country.")>] TargetedEconomicAid of
+        countryName: string
     | [<Action("nuke", "Nuke a country of your choice")>] Nuke of countryName: string
     // for free hordes *only*
     | [<Action("send_zombie_horde_to", "Send a zombie horde to a country of your choice")>] SendZombieHordeTo of
@@ -722,6 +768,136 @@ module Actions =
             act.MutateProp "bubbleName" (fun x -> (x :?> StringSchema).SetEnum types)
             act)
 
+    let aa1<'T> act (validate: (Country * LocalDisease) -> bool) (game: Game<'T>) (aa: AbilityButton) : Action option =
+        let d = CGameManager.localPlayerInfo.disease
+        let cost = CGameManager.GetActiveAbilityCost(aa.abilityType, d)
+
+        if aa.button.isEnabled && d.evoPoints >= cost then
+            let names =
+                map ()
+                |> List.map _.GetCountry()
+                |> List.filter (fun c -> validate (c, c.GetLocalDisease d))
+                |> List.map (_.name >> CLocalisationManager.GetText)
+                |> Array.ofList
+
+            if Array.isEmpty names then
+                None
+            else
+                let act = game.Action act
+                act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+
+                if cost > 0 then
+                    act.Description <- act.InitialDescription + $" Costs {cost} DNA points."
+                else
+                    act.Description <- act.InitialDescription + " Does not cost DNA points."
+
+                Some act
+        else
+            None
+
+    let aa2<'T>
+        act
+        (validateSrc: (Country * LocalDisease) -> bool)
+        (game: Game<'T>)
+        (aa: AbilityButton)
+        : Action option =
+        let d = CGameManager.localPlayerInfo.disease
+        let cost = CGameManager.GetActiveAbilityCost(aa.abilityType, d)
+
+        if aa.button.isEnabled && d.evoPoints >= cost then
+            let names =
+                map ()
+                |> List.map _.GetCountry()
+                |> List.filter (fun c -> validateSrc (c, c.GetLocalDisease d))
+                |> List.map (_.name >> CLocalisationManager.GetText)
+                |> Array.ofList
+
+            if Array.isEmpty names then
+                None
+            else
+                let names' = countryNames () |> Array.ofList
+                let act = game.Action act
+                act.MutateProp "sourceCountryName" (fun x -> (x :?> StringSchema).SetEnum names)
+                act.MutateProp "destinationCountryName" (fun x -> (x :?> StringSchema).SetEnum names')
+
+                if cost > 0 then
+                    act.Description <- act.InitialDescription + $" Costs {cost} DNA points."
+                else
+                    act.Description <- act.InitialDescription + " Does not cost DNA points."
+
+                Some act
+        else
+            None
+
+    // most of this logic is from IsHoverStateValid
+    let reanimate = aa1 Reanimate (snd >> _.GetReanimateValue() >> (<) 0)
+    let zombieHorde = aa2 ZombieHorde (snd >> _.zombie >> (<) 0)
+    let apeRampage = aa1 Rampage (snd >> _.apeInfectedPopulation >> (<) 0)
+    let apeTravel = aa2 ApeTravel (snd >> _.apeInfectedPopulation >> (<) 0)
+
+    let createColony =
+        aa1 CreateColony (fun (c, ld) -> ld.apeInfectedPopulation > 0 && not c.hasApeColony)
+
+    let unscheduledFlight =
+        aa2 UnscheduledFlight (fun (c, ld) ->
+            if CGameManager.IsCoopMPGame then
+                c.localDiseases |> Seq.exists (_.infectedPopulation >> (<) 1000)
+            else
+                ld.infectedPopulation > 1000)
+
+    let immuneShock =
+        aa1 ImmuneShock (fun (_, ld) ->
+            CGameManager.IsVersusMPGame
+            && ld.uncontrolledInfected + ld.controlledInfected > 0
+            && (ld :?> MPLocalDisease).immuneShockCounter <= 0)
+
+    let benignMimic =
+        aa1 BenignMimic (fun (c, ld) ->
+            let ld2 =
+                if World.instance.diseases.Count = 2 then
+                    c.GetLocalDisease(
+                        World.instance.diseases[if World.instance.diseases.[0] = ld.disease then 1 else 0]
+                    )
+                else
+                    null
+
+            CGameManager.IsVersusMPGame
+            && ld.allInfected > 0
+            && ld.allInfected + c.deadPopulation >= c.originalPopulation
+            && (ld :?> MPLocalDisease).benignMimicCounter <= 0
+            && ld2 <> null
+            && (ld2 :?> MPLocalDisease).benignMimicCounter <= 0)
+
+    let infectBoost =
+        aa1 InfectBoost (fun (c, ld) ->
+            CGameManager.IsCoopMPGame
+            && c.totalInfected > 0
+            && (ld :?> CoopLocalDisease).infectBoostCounter <= 0)
+
+    let lethalBoost =
+        aa1 LethalBoost (fun (c, ld) ->
+            CGameManager.IsCoopMPGame
+            && c.totalInfected > 0
+            && (ld :?> CoopLocalDisease).lethalBoostCounter <= 0)
+
+    let bloodRage = aa1 ToggleBloodRage (snd >> _.zombie >> (<) 0)
+    let vampireFlight = aa2 VampireFlight (snd >> _.zombie >> (<) 0)
+
+    let createLair =
+        aa1 CreateLair (fun (_, ld) -> ld.zombie > 0 && ld.castleState = ECastleState.CASTLE_NONE)
+
+    let fieldOperatives =
+        aa1 FieldOperatives (fun (_, ld) ->
+            not ld.hasTeam
+            && ld.disease.vampires.Count > 0
+            && ld.disease.vampires.[0].currentCountry <> null)
+
+    let targetedQuarantine =
+        aa1 TargetedQuarantine (fun (_, ld) -> ld.hasIntel && not ld.lockdownAAActive && ld.infectedPercent > 0f)
+
+    let targetedEconomicAid =
+        aa1 TargetedEconomicAid (fun (_, ld) -> ld.hasIntel && ld.compliance < 1f)
+
 type Game(plugin: MainClass) =
     inherit Game<Actions>()
 
@@ -862,7 +1038,7 @@ type Game(plugin: MainClass) =
             else
                 Error(Some "This can't be devolved!")
 
-        let useDifferentTargetAction act hudMode countryName =
+        let postBubbleDifferentTargetAction act hudMode countryName =
             if CHUDScreen.instance.HudInterfaceMode = hudMode then
                 match
                     map ()
@@ -887,10 +1063,317 @@ type Game(plugin: MainClass) =
             else
                 Error(Some "This can't be done anymore")
 
+        let execAction2
+            (checks: (((Country * LocalDisease) -> (Country * LocalDisease) -> bool) * string) list)
+            (ty: EAbilityType)
+            src
+            dst
+            =
+            let chk2 f s =
+                Result.bind (fun (x, y) -> if f x y then Ok(x, y) else Error(Some s))
+
+            let map = map ()
+
+            let src =
+                map
+                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) src)
+
+            let dst =
+                map
+                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) dst)
+
+            let sub = screen.GetSubScreen "ability" :?> CHUDAbilitySubScreen
+
+            let btns =
+                typeof<CHUDAbilitySubScreen>
+                    .GetField("abilitiesButtonMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
+                    .GetValue(sub)
+                :?> Generic.Dictionary<EAbilityType, AbilityButton>
+
+            let cost = CGameManager.GetActiveAbilityCost(ty, d)
+
+            match btns |> Seq.tryFind (_.Key >> (=) ty) |> Option.map _.Value with
+            | None -> Error(Some "You haven't researched this ability!")
+            | Some btn when not btn.button.isEnabled -> Error(Some "The ability is on cooldown")
+            | Some _ when d.evoPoints < cost ->
+                Error(Some $"You must have at least {cost} DNA points to use this ability; you only have {d.evoPoints}")
+            | Some btn ->
+                match src, dst with
+                | Some src, Some dst ->
+                    let src' = src.GetCountry()
+                    let dst' = dst.GetCountry()
+                    let src'' = src'.GetLocalDisease d
+                    let dst'' = dst'.GetLocalDisease d
+                    let state = Ok((src', src''), (dst', dst''))
+
+                    List.fold (fun state x -> state |> chk2 (fst x) (snd x)) state checks
+                    |> Result.bind (fun _ ->
+                        if CHUDScreen.instance.HudInterfaceMode = EHudMode.Normal then
+                            Ok()
+                        else
+                            Error(Some "Unknown mod error: HUD mode isn't normal"))
+                    |> Result.bind (fun () ->
+                        let screen = CUIManager.instance.GetCurrentScreen() :?> BaseMapScreen
+                        let srcPos = src.GetRandomPositionInsideCountry()
+                        let dstPos = dst.GetRandomPositionInsideCountry()
+                        sub.StartAbility(btn)
+
+                        Ok()
+                        |> Result.bind (fun () ->
+                            if CHUDScreen.instance.HudInterfaceMode = EHudMode.Normal then
+                                Error(Some "Unknown mod error: HUD mode didn't change after ability activation")
+                            else
+                                Ok())
+                        |> Result.bind (fun () ->
+                            let mode = CHUDScreen.instance.HudInterfaceMode
+                            screen.OnCountryHover(src, srcPos)
+
+                            if CInterfaceManager.instance.HoverCountry <> src then
+                                CHUDScreen.instance.Default()
+                                Error(Some "Unknown mod error: hover country didn't match expected source country")
+                            else
+                                Ok mode)
+                        |> Result.bind (fun mode ->
+                            screen.OnCountryClick(src, srcPos, true)
+
+                            if CHUDScreen.instance.HudInterfaceMode = mode then
+                                CHUDScreen.instance.Default()
+
+                                Error(
+                                    Some
+                                        "Unknown mod error: HUD mode didn't change after clicking on the initial country"
+                                )
+                            elif CHUDScreen.instance.HudInterfaceMode = EHudMode.Normal then
+                                Error(Some "Unknown mod error: HUD mode got reset to normal")
+                            else
+                                Ok())
+                        |> Result.bind (fun () ->
+                            screen.OnCountryHover(dst, dstPos)
+
+                            if CInterfaceManager.instance.HoverCountry <> dst then
+                                CHUDScreen.instance.Default()
+
+                                Error(
+                                    Some "Unknown mod error: hover country didn't match expected destination country"
+                                )
+                            else
+                                Ok())
+                        |> Result.bind (fun () ->
+                            screen.OnCountryClick(dst, dstPos, true)
+
+                            if CHUDScreen.instance.HudInterfaceMode <> EHudMode.Normal then
+                                CHUDScreen.instance.Default()
+
+                                Error(
+                                    Some
+                                        "Unknown mod error: HUD mode didn't get reset to normal after clicking on the destination country"
+                                )
+                            else
+                                Ok None))
+                | None, None -> Error(Some "Both source and destination countries were not found!")
+                | None, Some _ -> Error(Some "Source country was not found.")
+                | Some _, None -> Error(Some "Destination country was not found.")
+
+        let execAction1 (checks: (((Country * LocalDisease) -> bool) * string) list) (ty: EAbilityType) country =
+            let chk f s =
+                Result.bind (fun x -> if f x then Ok x else Error(Some s))
+
+            let map = map ()
+
+            let country =
+                map
+                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) country)
+
+            let sub = screen.GetSubScreen "ability" :?> CHUDAbilitySubScreen
+
+            let btns =
+                typeof<CHUDAbilitySubScreen>
+                    .GetField("abilitiesButtonMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
+                    .GetValue(sub)
+                :?> Generic.Dictionary<EAbilityType, AbilityButton>
+
+            let cost = CGameManager.GetActiveAbilityCost(ty, d)
+
+            match btns |> Seq.tryFind (_.Key >> (=) ty) |> Option.map _.Value with
+            | None -> Error(Some "You haven't researched this ability!")
+            | Some btn when not btn.button.isEnabled -> Error(Some "The ability is on cooldown")
+            | Some _ when d.evoPoints < cost ->
+                Error(Some $"You must have at least {cost} DNA points to use this ability; you only have {d.evoPoints}")
+            | Some btn ->
+                match country with
+                | Some country ->
+                    let country' = country.GetCountry()
+                    let country'' = country'.GetLocalDisease d
+                    let state = Ok((country', country''))
+
+                    List.fold (fun state x -> state |> chk (fst x) (snd x)) state checks
+                    |> Result.bind (fun _ ->
+                        if CHUDScreen.instance.HudInterfaceMode = EHudMode.Normal then
+                            Ok()
+                        else
+                            Error(Some "Unknown mod error: HUD mode isn't normal"))
+                    |> Result.bind (fun () ->
+                        let screen = CUIManager.instance.GetCurrentScreen() :?> BaseMapScreen
+                        let countryPos = country.GetRandomPositionInsideCountry()
+                        sub.StartAbility(btn)
+
+                        Ok()
+                        |> Result.bind (fun () ->
+                            if CHUDScreen.instance.HudInterfaceMode = EHudMode.Normal then
+                                Error(Some "Unknown mod error: HUD mode didn't change after ability activation")
+                            else
+                                Ok())
+                        |> Result.bind (fun () ->
+                            screen.OnCountryHover(country, countryPos)
+
+                            if CInterfaceManager.instance.HoverCountry <> country then
+                                CHUDScreen.instance.Default()
+                                Error(Some "Unknown mod error: hover country didn't match expected source country")
+                            else
+                                Ok())
+                        |> Result.bind (fun () ->
+                            screen.OnCountryClick(country, countryPos, true)
+
+                            if CHUDScreen.instance.HudInterfaceMode <> EHudMode.Normal then
+                                CHUDScreen.instance.Default()
+
+                                Error(
+                                    Some
+                                        "Unknown mod error: HUD mode didn't get reset to normal after clicking on the destination country"
+                                )
+                            else
+                                Ok None))
+                | None -> Error(Some "This country doesn't exist!")
+
         match action with
-        | Nuke countryName -> useDifferentTargetAction Nuke EHudMode.NukeStrike countryName
-        | SendTrojanPlane countryName -> useDifferentTargetAction SendTrojanPlane EHudMode.Neurax countryName
-        | SendZombieHordeTo countryName -> useDifferentTargetAction SendZombieHordeTo EHudMode.SendHorde countryName
+        | ZombieHorde(src, dst) ->
+            execAction2
+                [ (fun (_, ld) _ -> ld.zombie > 0), "Source country must have zombies" ]
+                EAbilityType.zombie_horde
+                src
+                dst
+        // TODO: properly do flight distance checks
+        | VampireFlight(src, dst) ->
+            execAction2
+                [ (fun (_, ld) _ -> ld.zombie > 0), "Source country must have a vampire" ]
+                EAbilityType.vampiretravel
+                src
+                dst
+        | UnscheduledFlight(src, dst) ->
+            execAction2
+                [ (fun (c, ld) _ ->
+                      if CGameManager.IsCoopMPGame then
+                          c.localDiseases |> Seq.exists (_.infectedPopulation >> (<) 1000)
+                      else
+                          ld.infectedPopulation > 1000),
+                  "Source country must have over 1000 infected people"
+                  (fun (c1, _) (c2, _) -> c1 <> c2), "Source country must differ from destination country" ]
+                EAbilityType.unscheduled_flight
+                src
+                dst
+        | ApeTravel(src, dst) ->
+            execAction2
+                [ (fun (_, ld) _ -> ld.apeInfectedPopulation > 0), "Source country must have infected apes"
+                  (fun (c1, _) (c2, _) -> c1 <> c2), "Source country must differ from destination country" ]
+                EAbilityType.move
+                src
+                dst
+        | TargetedQuarantine countryName ->
+            execAction1
+                [ (snd >> _.hasIntel), "You don't have intel on target country"
+                  (snd >> _.lockdownAAActive >> not), "The country is already on lockdown"
+                  (snd >> _.infectedPercent >> (<) 0f), "The country doesn't have any infected people" ]
+                EAbilityType.raise_priority
+                countryName
+        | TargetedEconomicAid countryName ->
+            execAction1
+                [ (snd >> _.hasIntel), "You don't have intel on target country"
+                  (snd >> _.compliance >> (>) 1f), "The country is already fully compliant" ]
+                EAbilityType.economic_support
+                countryName
+        | Reanimate countryName ->
+            execAction1
+                [ (snd >> _.GetReanimateValue() >> (<) 0), "The country must have dead people" ]
+                EAbilityType.reanimate
+                countryName
+        | Rampage countryName ->
+            execAction1
+                [ (snd >> _.apeInfectedPopulation >> (<) 0), "The country must have infected apes" ]
+                EAbilityType.rampage
+                countryName
+        | LethalBoost countryName ->
+            execAction1
+                [ (fun _ -> CGameManager.IsCoopMPGame), "The game must be coop multiplayer"
+                  (fun (_, ld) -> (ld :?> CoopLocalDisease).lethalBoostCounter <= 0),
+                  "The ability is on cooldown in that country" ]
+                EAbilityType.lethal_boost
+                countryName
+        | InfectBoost countryName ->
+            execAction1
+                [ (fun _ -> CGameManager.IsCoopMPGame), "The game must be coop multiplayer"
+                  (fun (_, ld) -> (ld :?> CoopLocalDisease).infectBoostCounter <= 0),
+                  "The ability is on cooldown in that country" ]
+                EAbilityType.infect_boost
+                countryName
+        | ImmuneShock countryName ->
+            execAction1
+                [ (fun _ -> CGameManager.IsVersusMPGame), "The game must be versus multiplayer"
+                  (fun (_, ld) -> ld.uncontrolledInfected + ld.controlledInfected > 0),
+                  "The target country must have infected people"
+                  (fun (_, ld) -> (ld :?> MPLocalDisease).immuneShockCounter <= 0),
+                  "The ability is on cooldown in that country" ]
+                EAbilityType.immune_shock
+                countryName
+        | FieldOperatives countryName ->
+            execAction1
+                [ (snd >> _.hasTeam >> not), "The field operatives are already in that country"
+                  (snd >> _.disease.vampires.Count >> (<) 0), "You don't have any field operatives"
+                  (snd >> _.disease.vampires.[0].currentCountry >> (<>) null),
+                  "Unknown error: field operatives exist, but aren't present in the world" ]
+                EAbilityType.investigation_team
+                countryName
+        | CreateLair countryName ->
+            execAction1
+                [ (snd >> _.zombie >> (<) 0), "The country must have vampires"
+                  (snd >> _.castleState >> (=) ECastleState.CASTLE_NONE), "The country already has a lair" ]
+                EAbilityType.castle
+                countryName
+        | CreateColony countryName ->
+            execAction1
+                [ (snd >> _.apeInfectedPopulation >> (<) 0), "The country must have infected apes"
+                  (fst >> _.hasApeColony >> not), "The country already has an ape colony" ]
+                EAbilityType.bloodrage
+                countryName
+        | ToggleBloodRage countryName ->
+            execAction1
+                [ (snd >> _.zombie >> (<) 0), "The country must have vampires" ]
+                EAbilityType.bloodrage
+                countryName
+        | BenignMimic countryName ->
+            let ld2 ((c, ld): Country * LocalDisease) =
+                if World.instance.diseases.Count = 2 then
+                    c.GetLocalDisease(
+                        World.instance.diseases[if World.instance.diseases.[0] = ld.disease then 1 else 0]
+                    )
+                else
+                    null
+
+            execAction1
+                [ (fun _ -> CGameManager.IsVersusMPGame), "The game must be versus multiplayer"
+                  (snd >> _.allInfected >> (<) 0), "The country must have infected people"
+                  (fun (c, ld) -> ld.allInfected + c.deadPopulation >= c.originalPopulation),
+                  "You haven't infected enough people in this country to use this ability"
+                  (fun (_, ld) -> (ld :?> MPLocalDisease).benignMimicCounter <= 0),
+                  "The ability is on cooldown in that country"
+                  (ld2
+                   >> fun ld2 -> ld2 <> null && (ld2 :?> MPLocalDisease).benignMimicCounter <= 0),
+                  "The ability is on cooldown in that country" ]
+                EAbilityType.benign_mimic
+                countryName
+        | Nuke countryName -> postBubbleDifferentTargetAction Nuke EHudMode.NukeStrike countryName
+        | SendTrojanPlane countryName -> postBubbleDifferentTargetAction SendTrojanPlane EHudMode.Neurax countryName
+        | SendZombieHordeTo countryName ->
+            postBubbleDifferentTargetAction SendZombieHordeTo EHudMode.SendHorde countryName
         | ClickBubble(countryName, bubbleName) ->
             let ub =
                 typeof<CInterfaceManager>
@@ -1338,9 +1821,94 @@ type Game(plugin: MainClass) =
 
                                []
                            | "Context", (:? CHUDContextSubScreen) -> []
-                           | "ability", (:? CHUDAbilitySubScreen) ->
+                           | "ability", (:? CHUDAbilitySubScreen as sub) ->
                                // TODO active abilities
-                               []
+                               let btns =
+                                   typeof<CHUDAbilitySubScreen>
+                                       .GetField(
+                                           "abilitiesButtonMap",
+                                           BindingFlags.NonPublic ||| BindingFlags.Instance
+                                       )
+                                       .GetValue(sub)
+                                   :?> Generic.Dictionary<EAbilityType, AbilityButton>
+
+                               btns
+                               |> Seq.collect (fun item ->
+                                   let aab = item.Value
+
+                                   match item.Key with
+                                   // necroa: Active ability enables neurological regeneration in the brains of infected corpses - effectively re-animating some of the dead
+                                   // Reanimate: Cellular regeneration makes some dead zombies rise again. Requires 'dead' population. Press button then click on country to select target. Target country must have dead within. (Cost: %s DNA)
+                                   | EAbilityType.reanimate -> Actions.reanimate this aab |> Option.toList
+                                   // necroa: Active ability lets Zombies form hordes to travel across land and water and attack new lands
+                                   // Zombie Horde: Gather a horde of zombies to send to another country. Requires 'zombie' population. Press button and click on a start country. Then select destination country. Start country must have zombies in. (Cost: %s DNA)
+                                   | EAbilityType.zombie_horde -> Actions.zombieHorde this aab |> Option.toList
+                                   // simian flu: Apes gain ability to rampage against humans - targeting labs and rescuing captive apes
+                                   // Rampage: Intelligent apes come together to build a community, rescue others and protect themselves
+                                   | EAbilityType.rampage -> Actions.apeRampage this aab |> Option.toList
+                                   // simian flu: Apes able to plan and co-ordinate travel together - allowing movement of ape groups over long distances
+                                   // Travel: Intelligent apes leave their homes and move to a new location
+                                   | EAbilityType.move -> Actions.apeTravel this aab |> Option.toList
+                                   // simian flu: Intelligent apes can come together to build a colony which increases ape transmission, protects and generate DNA
+                                   // Create Colony: Intelligent apes come together to build a community, rescue others and protect themselves
+                                   | EAbilityType.create_colony -> Actions.createColony this aab |> Option.toList
+                                   // mp: Unlock an Active Ability that lets you send an infected person to a country of your choice
+                                   // Unscheduled Flight: Infected people travel to another country. Can only be sent from a country with at least 1,000 infected population
+                                   | EAbilityType.unscheduled_flight ->
+                                       Actions.unscheduledFlight this aab |> Option.toList
+                                   // mp: Unlock an Active Ability that makes it significantly easier to kill people infected with both diseases
+                                   // Immune Shock: Increase your infectivity and make it significantly easier to kill people infected by both diseases in a target country
+                                   | EAbilityType.immune_shock -> Actions.immuneShock this aab |> Option.toList
+                                   // mp: Unlock an Active Ability that forces a country to focus cure efforts on the other disease, whilst your disease hides
+                                   // Benign Mimic: Target country gains significant boost to research of opponent's disease. (Target must be fully infected and your disease goes dormant there)
+                                   | EAbilityType.benign_mimic -> Actions.benignMimic this aab |> Option.toList
+                                   // mp: Unlock an Active Ability that lets you boost infectivity in a country
+                                   // Infect Boost: Increase infectivity of both diseases in a target country
+                                   | EAbilityType.infect_boost -> Actions.infectBoost this aab |> Option.toList
+                                   // mp: Unlock an Active Ability that lets you boost lethality in a country
+                                   // Lethal Boost: Increase lethality of both diseases in a target country
+                                   | EAbilityType.lethal_boost -> Actions.lethalBoost this aab |> Option.toList
+                                   // vampire: Vampire gains ability to enter a Blood Rage - will attack research/military facilities if present, otherwise consuming people for DNA
+                                   // Blood Rage: Vampire attacks research/military facilities if present, otherwise goes on killing spree to get DNA
+                                   | EAbilityType.bloodrage -> Actions.bloodRage this aab |> Option.toList
+                                   // vampire: Vampire gains ability to temporarily mutate into a vast, winged bat-like creature. Allows travel to nearby countries
+                                   // Vampire Flight: Send a vampire to another country
+                                   | EAbilityType.vampiretravel -> Actions.vampireFlight this aab |> Option.toList
+                                   // vampire: Vampire able to create a lair for it to rest in and heal. Also generates DNA (Infected population increases DNA)
+                                   // Create Lair: Create a lair for the vampire to heal in. Also generates DNA based on infected population
+                                   | EAbilityType.castle -> Actions.createLair this aab |> Option.toList
+                                   // Not technically unlocked by any tech, instead this aa ability is unlocked internally by native code
+                                   // Field Operatives: Send the Field Operatives to a target country.
+                                   | EAbilityType.investigation_team ->
+                                       Actions.fieldOperatives this aab |> Option.toList
+                                   // cure: Force a target country to shut border connections and lock down for 1 month.\nNon-Compliance will increase if the public thinks it is unnecessary.
+                                   // Targeted Quarantine: Force a target country to shut border connections and lock down for 1 month.
+                                   | EAbilityType.raise_priority ->
+                                       Actions.targetedQuarantine this aab |> Option.toList
+                                   // cure: Send significant financial aid package the targeted country.
+                                   // Targeted Economic Aid: Send significant financial aid package to help a country struggling with Quarantine measures.\nDecrease Non-Compliance in target country
+                                   | EAbilityType.economic_support ->
+                                       Actions.targetedEconomicAid this aab |> Option.toList
+                                   // never unlocked, but usable, might be unlockable with scenarios? probably not
+                                   // this is also used internally when a nuke bubble is spawned
+                                   | EAbilityType.nuke ->
+                                       this.LogError $"Warning: nuke ability"
+                                       []
+                                   // never unlocked, but used internally
+                                   | EAbilityType.neurax ->
+                                       this.LogError $"Warning: neurax ability"
+                                       []
+                                   // cut content?
+                                   | EAbilityType.bubble ->
+                                       this.LogError $"Warning: bubble ability"
+                                       []
+                                   | EAbilityType.help ->
+                                       this.LogError $"Warning: help ability"
+                                       []
+                                   | x ->
+                                       this.LogError $"Warning: unknown ability type {x}"
+                                       [])
+                               |> List.ofSeq
                            | key, value ->
                                this.LogDebug $"CHUDS / {key} / {value.GetType().Name}"
                                [])
