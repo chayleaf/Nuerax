@@ -641,8 +641,6 @@ module Context =
 
         let bubbles =
             ub :: (CInterfaceManager.instance.mpBonuses |> List.ofSeq)
-            |> List.filter ((<>) null)
-            |> List.filter (_.mpCountry >> (<>) null)
             |> List.filter (fun bubble ->
                 let getBool name =
                     typeof<BonusObject>
@@ -650,7 +648,9 @@ module Context =
                         .GetValue(bubble)
                     :?> bool
 
-                not (getBool "mbUnclickable")
+                bubble <> null
+                && bubble.mpCountry <> null
+                && not (getBool "mbUnclickable")
                 && not (getBool "mbBlocked")
                 && not (getBool "mbClicked")
                 && not (getBool "mbDead")
@@ -1440,7 +1440,9 @@ type Game(plugin: MainClass) =
                             .GetValue(bubble)
                         :?> bool
 
-                    not (getBool "mbUnclickable")
+                    bubble <> null
+                    && bubble.mpCountry <> null
+                    && not (getBool "mbUnclickable")
                     && not (getBool "mbBlocked")
                     && not (getBool "mbClicked")
                     && not (getBool "mbDead")
@@ -1574,7 +1576,7 @@ type Game(plugin: MainClass) =
             let map = map ()
 
             match countryName with
-            | Some countryName ->
+            | Some countryName when countryName <> "" ->
                 match
                     map
                     |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
@@ -1583,7 +1585,7 @@ type Game(plugin: MainClass) =
                     WorldMapController.instance.SetSelectedCountry country
                     Ok None
                 | None -> Error(Some "This country doesn't exist!")
-            | None ->
+            | _ ->
                 WorldMapController.instance.SetSelectedCountry()
                 Ok None
         | SetGameSpeed speed ->
@@ -1816,7 +1818,7 @@ type Game(plugin: MainClass) =
                         this.DoForce true c "Please pick genes for your plague." [ Actions.chooseGenes this c ]
                 | Some("main", (:? CGSDifficultySubScreen as x)) ->
                     // hardcode normal difficulty
-                    () // x.ChooseDifficulty(x.buttons.[1], true)
+                    x.ChooseDifficulty(x.buttons.[1], true)
                 | Some("main", (:? CGSNameSubScreen as x)) ->
                     let iv = x.input.value
 
@@ -2008,7 +2010,7 @@ type Game(plugin: MainClass) =
 
                         this.DoForce
                             true
-                            None
+                            ""
                             "Please pick a destination for the trojan plane"
                             [ Actions.sendTrojanPlane this; Actions.queryCountries this ]
                     | EHudMode.NukeStrike ->
@@ -2016,7 +2018,7 @@ type Game(plugin: MainClass) =
 
                         this.DoForce
                             true
-                            None
+                            ""
                             "Please pick a destination for the nuke"
                             [ Actions.nuke this; Actions.queryCountries this ]
                     | EHudMode.SendHorde ->
@@ -2024,7 +2026,7 @@ type Game(plugin: MainClass) =
 
                         this.DoForce
                             true
-                            None
+                            ""
                             "Please pick a destination for the zombie horde"
                             [ Actions.sendZombieHordeTo this; Actions.queryCountries this ]
                     | EHudMode.EconomicSupport
