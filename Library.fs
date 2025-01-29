@@ -785,9 +785,15 @@ module Actions =
 
         let act = game.Action QueryCountries
 
-        act.MutateProp "tags" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(tags.Contains))
-        act.MutateProp "tagsNot" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(tags.Contains))
-        act.MutateProp "sortBy" (fun x -> (x :?> StringSchema).RetainEnum(sortBy.Contains))
+        act.MutateProp "tags" (fun x ->
+            ((x :?> ArraySchema).Items :?> StringSchema)
+                .RetainEnum(game.Serialize >> tags.Contains))
+
+        act.MutateProp "tagsNot" (fun x ->
+            ((x :?> ArraySchema).Items :?> StringSchema)
+                .RetainEnum(game.Serialize >> tags.Contains))
+
+        act.MutateProp "sortBy" (fun x -> (x :?> StringSchema).RetainEnum(game.Serialize >> sortBy.Contains))
 
         act
 
@@ -1131,7 +1137,7 @@ type Game(plugin: MainClass) =
                 map
                 |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) dst)
 
-            let sub = screen.GetSubScreen "ability" :?> CHUDAbilitySubScreen
+            let sub = CHUDScreen.instance.abilitySubscreen
 
             let btns =
                 typeof<CHUDAbilitySubScreen>
@@ -1203,7 +1209,8 @@ type Game(plugin: MainClass) =
                                 CHUDScreen.instance.Default()
 
                                 Error(
-                                    Some "Unknown mod error: hover country didn't match expected destination country"
+                                    Some
+                                        "Couldn't perform action, the destination country is probably too far from the source country"
                                 )
                             else
                                 Ok())
@@ -1233,7 +1240,7 @@ type Game(plugin: MainClass) =
                 map
                 |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) country)
 
-            let sub = screen.GetSubScreen "ability" :?> CHUDAbilitySubScreen
+            let sub = CHUDScreen.instance.abilitySubscreen
 
             let btns =
                 typeof<CHUDAbilitySubScreen>
@@ -1277,7 +1284,7 @@ type Game(plugin: MainClass) =
 
                             if CInterfaceManager.instance.HoverCountry <> country then
                                 CHUDScreen.instance.Default()
-                                Error(Some "Unknown mod error: hover country didn't match expected source country")
+                                Error(Some "Unknown mod error: hover country didn't match expected country")
                             else
                                 Ok())
                         |> Result.bind (fun () ->
@@ -1486,7 +1493,7 @@ type Game(plugin: MainClass) =
             let mutable over = false
 
             while not over do
-                match CUIManager.instance.GetScreen "DiseaseScreen" with
+                match CUIManager.instance.GetCurrentScreen() with
                 | :? CResultScreen as screen -> screen.GoToEndScreen()
                 | :? CEndGameScreen as screen -> screen.OnClickExit()
                 | _ -> over <- true

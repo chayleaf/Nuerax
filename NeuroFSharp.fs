@@ -466,6 +466,7 @@ type Action(name: string, description: string) =
     abstract member Name: string
     abstract member MutableName: bool
     abstract member Description: string with get, set
+    abstract member InitialDescription: string
     abstract member Schema: ObjectSchema option with get, set
     abstract member Clone: unit -> Action
 
@@ -485,7 +486,7 @@ type Action(name: string, description: string) =
     member this.Valid = not (this.Schema |> Option.exists (_.Valid >> not))
     default _.Name = name
     default this.MutableName = this.GetType() <> typeof<Action>
-    member _.InitialDescription = description
+    default _.InitialDescription = description
 
     member this.EqualTo(other: Action) =
         this.Name = other.Name
