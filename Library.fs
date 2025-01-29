@@ -459,7 +459,7 @@ module Context =
 
         { name = None
           tags = None
-          infectedCount = int d.totalInfected
+          infectedCount = d.totalInfected
           infectedPercent = perc d.globalInfectedPercent
           infectedWeekly = int d.infectedWeekly
           healthyCount = d.totalHealthy
@@ -1304,14 +1304,16 @@ type Game(plugin: MainClass) =
         match action with
         | ZombieHorde(src, dst) ->
             execAction2
-                [ (fun (_, ld) _ -> ld.zombie > 0), "Source country must have zombies" ]
+                [ (fun (_, ld) _ -> ld.zombie > 0), "Source country must have zombies"
+                  (fun (c1, _) (c2, _) -> c1 <> c2), "Source country must differ from destination country" ]
                 EAbilityType.zombie_horde
                 src
                 dst
         // TODO: properly do flight distance checks
         | VampireFlight(src, dst) ->
             execAction2
-                [ (fun (_, ld) _ -> ld.zombie > 0), "Source country must have a vampire" ]
+                [ (fun (_, ld) _ -> ld.zombie > 0), "Source country must have a vampire"
+                  (fun (c1, _) (c2, _) -> c1 <> c2), "Source country must differ from destination country" ]
                 EAbilityType.vampiretravel
                 src
                 dst
