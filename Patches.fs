@@ -35,7 +35,7 @@ type public Patches() =
         if autoClick then
             MainClass.Instance.Game.BubblePopped bonusIcon
 
-    [<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetDiseaseUnlocked)>]
+    (*[<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetDiseaseUnlocked)>]
     [<HarmonyPostfix>]
     static member public DiseaseUnlock(__result: bool byref) = __result <- true
 
@@ -53,7 +53,7 @@ type public Patches() =
 
     [<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetCheatUnlocked)>]
     [<HarmonyPostfix>]
-    static member public CheatUnlock(__result: bool byref) = __result <- true
+    static member public CheatUnlock(__result: bool byref) = __result <- true*)
 
     (*[<HarmonyPatch(typeof<CNetworkSteam>, "UserStatsReceived")>]
     [<HarmonyPostfix>]
