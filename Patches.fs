@@ -34,8 +34,8 @@ type public Patches() =
     static member public BonusClicked(bonusIcon: BonusIcon) =
         if autoClick then
             MainClass.Instance.Game.BubblePopped bonusIcon
-(*
-    [<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetDiseaseUnlocked)>]
+
+    (*[<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetDiseaseUnlocked)>]
     [<HarmonyPostfix>]
     static member public DiseaseUnlock(__result: bool byref) = __result <- true
 
@@ -53,5 +53,21 @@ type public Patches() =
 
     [<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetCheatUnlocked)>]
     [<HarmonyPostfix>]
-    static member public CheatUnlock(__result: bool byref) = __result <- true
-*)
+    static member public CheatUnlock(__result: bool byref) = __result <- true*)
+
+    (*[<HarmonyPatch(typeof<CNetworkSteam>, "UserStatsReceived")>]
+    [<HarmonyPostfix>]
+    static member public ResetStats() = CPlayerInfoSteam.ClearAllSteamStats()*)
+
+    [<HarmonyPatch(typeof<CUIManager>, nameof Unchecked.defaultof<CUIManager>.LocalisedConfirmOverlay)>]
+    [<HarmonyPostfix>]
+    static member public DontShowPopups(__result: CConfirmOverlay byref) =
+        CUIManager.instance.HideOverlay __result
+
+    [<HarmonyPatch(typeof<CMainMenuScreen>, "ShowDynamicPopup")>]
+    [<HarmonyPrefix>]
+    static member public DontShowDynamicPopups() = false
+
+    [<HarmonyPatch(typeof<CUIManager>, nameof Unchecked.defaultof<CUIManager>.ShowUnlockPopup)>]
+    [<HarmonyPrefix>]
+    static member public DontShowUnlockPopups() = false

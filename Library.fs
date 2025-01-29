@@ -38,6 +38,8 @@ type CureField(cureName: string) =
     override _.ExtraDeserializationNames =
         if CGameManager.IsCureGame then [ cureName ] else []
 
+type VampireCtx = { countryName: string; health: string }
+
 type BubbleCtx =
     { countryName: string
       bubbleName: string
@@ -119,12 +121,15 @@ type SortBy =
     | ``Healthy%``
     | ``Infected%``
     | ``Dead%``
-    | CureContribution
+    | CureInvestment
     | ``PublicOrder%``
     | ``Zombie%``
     | ``ApeHealthy%``
     | ``ApeInfected%``
     | ``ApeDead%``
+    // cure mode
+    | ``AuthorityLoss%``
+    | ``Noncompliance%``
 
 type CountryOrWorldContext =
     { [<SkipSerializingIfNone>]
@@ -163,6 +168,12 @@ type CountryOrWorldContext =
       [<SkipSerializingIfEquals 0f>]
       [<RenameField "apeDead%">]
       apeDeadPercent: float32
+      [<SkipSerializingIfEquals 0f>]
+      [<RenameField "authorityLoss%">]
+      authorityLossPercent: float32
+      [<SkipSerializingIfEquals 0f>]
+      [<RenameField "noncompliance%">]
+      noncompliancePercent: float32
       [<SkipSerializingIfNone>]
       tags: Tag list option
       [<SkipSerializingIfEquals 0L>]
@@ -286,7 +297,7 @@ type Actions =
         sortBy: SortBy option *
         sortDescending: bool option
     | [<Action("focus_country",
-               "Focus on a specific country. This will have no effect on gameplay, but you will start receiving live updates on that country's statistics. You can leave countryName null or empty to unfocus the country.")>] FocusCountry of
+               "Focus on a specific country. This will have no effect on gameplay, but you will start receiving live updates on that country's statistics. You can leave countryName null or empty to unfocus the country. Note that when you focus a country, viewers won't be able to see global stats anymore.")>] FocusCountry of
         countryName: string option
     | [<Action("click_bubble",
                "Click on a bubble, which usually gives you some rewards. It is always recommended to do this when you can.")>] ClickBubble of
@@ -330,7 +341,10 @@ type Context =
       tips: string list option
       world: CountryOrWorldContext
       [<SkipSerializingIfNone>]
-      focusedCountry: CountryOrWorldContext option }
+      focusedCountry: CountryOrWorldContext option
+      [<SkipSerializingIfNone>]
+      [<CureField "fieldOperatives">]
+      vampires: VampireCtx list option }
 
 type TechScreenCtx =
     { dnaPoints: int
@@ -463,6 +477,19 @@ module Context =
           apeDeadPercent = perc d.apeTotalDeadPercent
           cureInvestmentDollars = d.globalCureResearch
           cureRequirementDollars = int d.cureRequirements
+          authorityLossPercent =
+            if CGameManager.IsCureGame then
+                d.authLossInfectedActual
+                + d.authLossDeadActual
+                + d.authLossSpread
+                + d.authLossCompliance
+            else
+                0f
+          noncompliancePercent =
+            if CGameManager.IsCureGame then
+                d.globalAvgCompliance
+            else
+                0f
           publicOrderPercent = 0f
           dnaPointsBonusForStartingHere = 0 }
 
@@ -527,6 +554,16 @@ module Context =
           cureInvestmentDollars = ld.localCureResearch
           cureRequirementDollars = 0
           publicOrderPercent = min 100f (perc country.publicOrder)
+          authorityLossPercent =
+            if CGameManager.IsCureGame then
+                perc ld.totalLocalAuthLoss
+            else
+                0f
+          noncompliancePercent =
+            if CGameManager.IsCureGame then
+                max 0f (perc (1f - ld.compliance))
+            else
+                0f
           tags = Some tags
           dnaPointsBonusForStartingHere =
             if CUIManager.instance.GetCurrentScreen() :? CCountrySelect then
@@ -568,6 +605,10 @@ module Context =
           bubbleName = name
           description = desc }
 
+    let vampire (vampire: Vampire) : VampireCtx =
+        { countryName = CLocalisationManager.GetText(vampire.currentCountry.name)
+          health = $"{int vampire.vampireHealth}/{int vampire.vampireHealthMax}" }
+
     let context () : Context =
         let d = CGameManager.localPlayerInfo.disease
         let techMap = d.technologies |> Seq.map (fun x -> x.id, x) |> Map.ofSeq
@@ -599,8 +640,9 @@ module Context =
             :?> BonusObject
 
         let bubbles =
-            (CInterfaceManager.instance.mpBonuses |> List.ofSeq)
-            @ if ub = null then [] else [ ub ]
+            ub :: (CInterfaceManager.instance.mpBonuses |> List.ofSeq)
+            |> List.filter ((<>) null)
+            |> List.filter (_.mpCountry >> (<>) null)
             |> List.filter (fun bubble ->
                 let getBool name =
                     typeof<BonusObject>
@@ -640,7 +682,10 @@ module Context =
             if CInterfaceManager.instance.SelectedCountryView = null then
                 None
             else
-                Some(country (CInterfaceManager.instance.SelectedCountryView.GetCountry())) }
+                Some(country (CInterfaceManager.instance.SelectedCountryView.GetCountry()))
+          vampires =
+            let vampires = d.vampires |> List.ofSeq |> List.map vampire
+            if List.isEmpty vampires then None else Some vampires }
 
 module Actions =
     let map () =
@@ -727,12 +772,14 @@ module Actions =
                     (i2l x.healthyPercent ``Healthy%``)
                     @ (i2l x.infectedPercent ``Infected%``)
                     @ (i2l x.deadPercent ``Dead%``)
-                    @ (i2l x.cureInvestmentDollars CureContribution)
+                    @ (i2l x.cureInvestmentDollars CureInvestment)
                     @ (i2l x.publicOrderPercent ``PublicOrder%``)
                     @ (i2l x.zombiePercent ``Zombie%``)
                     @ (i2l x.apeHealthyPercent ``ApeHealthy%``)
                     @ (i2l x.apeInfectedPercent ``ApeInfected%``)
-                    @ (i2l x.apeDeadPercent ``ApeDead%``))
+                    @ (i2l x.apeDeadPercent ``ApeDead%``)
+                    @ (i2l x.authorityLossPercent ``AuthorityLoss%``)
+                    @ (i2l x.noncompliancePercent ``Noncompliance%``))
             )
             |> Set.map game.Serialize
 
@@ -740,7 +787,7 @@ module Actions =
 
         act.MutateProp "tags" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(tags.Contains))
         act.MutateProp "tagsNot" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(tags.Contains))
-        act.MutateProp "sortBy" (fun x -> ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(sortBy.Contains))
+        act.MutateProp "sortBy" (fun x -> (x :?> StringSchema).RetainEnum(sortBy.Contains))
 
         act
 
@@ -934,6 +981,8 @@ type Game(plugin: MainClass) =
             |> List.ofSeq
 
         let d = CGameManager.localPlayerInfo.disease
+        // just a good idea since this is checked all over the place
+        UICamera.hoveredObject <- null
 
         let findTech f s t w =
             let sub = screen.GetSubScreen $"{w}_SubScreen" :?> CTechTreeSubScreen
@@ -1499,12 +1548,14 @@ type Game(plugin: MainClass) =
                         | ``Healthy%`` -> _.healthyPercent
                         | ``Infected%`` -> _.infectedPercent
                         | ``Dead%`` -> _.deadPercent
-                        | CureContribution -> _.cureInvestmentDollars
+                        | CureInvestment -> _.cureInvestmentDollars
                         | ``PublicOrder%`` -> _.publicOrderPercent
                         | ``Zombie%`` -> _.zombiePercent
                         | ``ApeHealthy%`` -> _.apeHealthyPercent
                         | ``ApeInfected%`` -> _.apeInfectedPercent
                         | ``ApeDead%`` -> _.apeDeadPercent
+                        | ``AuthorityLoss%`` -> _.authorityLossPercent
+                        | ``Noncompliance%`` -> _.noncompliancePercent
                     )
 
             let countries =
@@ -1635,7 +1686,7 @@ type Game(plugin: MainClass) =
                                 Ok(i + 1)
                             | None ->
                                 let names = genes |> List.map (_.geneName >> CLocalisationManager.GetText)
-                                Error(Some $"Gene not found, available options: {this.Serialize names}"))
+                                Error(Some $"Gene {i + 1} not found, available options: {this.Serialize names}"))
                 (Ok(0))
             |> Result.map (fun _ ->
                 screen.OnClickNext()
@@ -1740,6 +1791,8 @@ type Game(plugin: MainClass) =
                 | _ -> ()
             | "CGSScreen" ->
                 // let screen = screen :?> CGSScreen
+                printfn $"{cur.Keys |> List.ofSeq}"
+
                 match openSub with
                 | Some("main", (:? CGSDiseaseSubScreen as x)) ->
                     let opts = x.allDiseases
@@ -1763,7 +1816,7 @@ type Game(plugin: MainClass) =
                         this.DoForce true c "Please pick genes for your plague." [ Actions.chooseGenes this c ]
                 | Some("main", (:? CGSDifficultySubScreen as x)) ->
                     // hardcode normal difficulty
-                    x.ChooseDifficulty(x.buttons.[1], true)
+                    () // x.ChooseDifficulty(x.buttons.[1], true)
                 | Some("main", (:? CGSNameSubScreen as x)) ->
                     let iv = x.input.value
 
@@ -1790,7 +1843,16 @@ type Game(plugin: MainClass) =
                             .GetValue(CInterfaceManager.instance)
                         :?> BonusObject
 
-                    if ub = null && CGameManager.localPlayerInfo.disease.nexus = null then
+                    let getBool name =
+                        typeof<BonusObject>
+                            .GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance)
+                            .GetValue(ub)
+                        :?> bool
+
+                    if
+                        (ub = null || not (getBool "mbClicked"))
+                        && CGameManager.localPlayerInfo.disease.nexus = null
+                    then
                         let ctx = Context.context ()
 
                         this.DoForce
@@ -1924,7 +1986,7 @@ type Game(plugin: MainClass) =
 
                         let allActions =
                             if curDate >= nextContextTime || newBubble then
-                                newBubble <- true
+                                newBubble <- false
                                 // send context every 5 seconds
                                 nextContextTime <-
                                     curDate.AddDays(
