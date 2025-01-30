@@ -2208,36 +2208,12 @@ and [<BepInPlugin("org.pavluk.nuerax", "Nuerax", "1.0.0")>] MainClass() =
             game <-
                 Some(
                     let game = Game(this)
-                    game.Start(Some("ws://127.0.0.1:8000"), cts.Token) |> ignore
+                    game.Start(None, cts.Token) |> ignore
                     game
                 )
 
-            this.Logger.LogInfo($"Plugin NeuroShogun is loaded with {cnt} patches!")
+            this.Logger.LogInfo($"Plugin Nuerax is loaded with {cnt} patches!")
         with exc ->
             this.Logger.LogError($"ERROR {exc}")
 
     member _.LateUpdate() = game |> Option.iter _.Update()
-(*let x = c.portStatus
-                        let y = c.airportStatus
-                        let bOpen = c.borderStatus
-                        let aOpen = c.hasAirport && c.airportStatus
-                        let pOpen = c.hasPorts && c.portStatus
-                        let d = CNetworkManager.network.LocalPlayerInfo.disease
-                        let defcon = CGameManager.GetDefconState(d.globalPriority)
-                        let totalH = d.totalHealthy
-                        let totalI = d.totalInfected
-                        let totalD = d.totalDead
-                        let totalZ = d.totalZombie
-                        let totalP = World.instance.totalPopulation
-                        let cureP = d.cureCompletePercent // 0..1
-                        let cureC = d.cureFlag // complete
-                        let cureR = d.CureDaysRemaining // <= 0 -> unknown
-                        let curD = CGameManager.currentGameDate
-                        let topContrib = d.GetTopCureContributors()
-                        let allocA = d.cureResearchAllocationAverage // >0.4 - high, >0.1 - medium, >0 - low, 0 - none
-                        let l = c.GetLocalDisease d
-                        let intel = l.hasIntel
-                        let countryI = l.infectedPopulation
-                        let countryD = l.killedPopulation
-                        let countryH = l.healthyPopulation
-                        let countryZ = l.zombiePopulation*)
