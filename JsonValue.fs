@@ -115,9 +115,9 @@ type JsonValue =
             | Null -> w.Write "null"
             | Boolean b -> w.Write(if b then "true" else "false")
             | Number number -> w.Write number
-            | Float v when Double.IsPositiveInfinity v -> w.Write("Inf")
-            | Float v when Double.IsNegativeInfinity v -> w.Write("-Inf")
-            | Float v when Double.IsNaN v -> w.Write("NaN")
+            | Float v when Double.IsPositiveInfinity v -> w.Write "Inf"
+            | Float v when Double.IsNegativeInfinity v -> w.Write "-Inf"
+            | Float v when Double.IsNaN v -> w.Write "NaN"
             | Float number -> w.Write number
             | String s ->
                 w.Write "\""
@@ -186,7 +186,7 @@ type JsonValue =
     member x.ToString(?indentationSpaces: int) =
         x.ToString(JsonSaveOptions.None, ?indentationSpaces = indentationSpaces)
 
-    override x.ToString() = x.ToString(JsonSaveOptions.None)
+    override x.ToString() = x.ToString JsonSaveOptions.None
 
 // --------------------------------------------------------------------------------------
 // JSON parser
@@ -223,7 +223,7 @@ type private JsonParser(jsonText: string) =
                 if i < s.Length && s.[i] = '/' then
                     i <- i + 1
 
-                    while i < s.Length && (s.[i] <> '\r' && s.[i] <> '\n') do
+                    while i < s.Length && s.[i] <> '\r' && s.[i] <> '\n' do
                         i <- i + 1
                 else if i < s.Length && s.[i] = '*' then
                     i <- i + 1
@@ -258,7 +258,7 @@ type private JsonParser(jsonText: string) =
         match s.[i] with
         | '"' -> cont (JsonValue.String(parseString ()))
         | '-' -> cont (parseNum ())
-        | c when Char.IsDigit(c) -> cont (parseNum ())
+        | c when Char.IsDigit c -> cont (parseNum ())
         | '{' -> parseObject cont
         | '[' -> parseArray cont
         | 't' -> cont (parseLiteral ("true", JsonValue.Boolean true))
@@ -275,14 +275,14 @@ type private JsonParser(jsonText: string) =
                 ensure (i + 1 < s.Length) "unclosed string"
 
                 match s.[i + 1] with
-                | 'b' -> buf.Append('\b') |> ignore
-                | 'f' -> buf.Append('\f') |> ignore
-                | 'n' -> buf.Append('\n') |> ignore
-                | 't' -> buf.Append('\t') |> ignore
-                | 'r' -> buf.Append('\r') |> ignore
-                | '\\' -> buf.Append('\\') |> ignore
-                | '/' -> buf.Append('/') |> ignore
-                | '"' -> buf.Append('"') |> ignore
+                | 'b' -> buf.Append '\b' |> ignore
+                | 'f' -> buf.Append '\f' |> ignore
+                | 'n' -> buf.Append '\n' |> ignore
+                | 't' -> buf.Append '\t' |> ignore
+                | 'r' -> buf.Append '\r' |> ignore
+                | '\\' -> buf.Append '\\' |> ignore
+                | '/' -> buf.Append '/' |> ignore
+                | '"' -> buf.Append '"' |> ignore
                 | 'u' ->
                     ensure (i + 5 < s.Length) "invalid escape code"
 
@@ -304,7 +304,7 @@ type private JsonParser(jsonText: string) =
                         )
 
                     let ch = unicodeChar (s.Substring(i + 2, 4))
-                    buf.Append(ch) |> ignore
+                    buf.Append ch |> ignore
                     i <- i + 4 // the \ and u will also be skipped past further below
                 | 'U' ->
                     ensure (i + 9 < s.Length) "invalid escape code"
@@ -320,8 +320,8 @@ type private JsonParser(jsonText: string) =
                         <| System.UInt32.Parse(s, NumberStyles.HexNumber)
 
                     let lead, trail = unicodeChar (s.Substring(i + 2, 8))
-                    buf.Append(lead) |> ignore
-                    buf.Append(trail) |> ignore
+                    buf.Append lead |> ignore
+                    buf.Append trail |> ignore
                     i <- i + 8 // the \ and u will also be skipped past further below
                 | _ -> throw "invalid escape character"
 
@@ -339,7 +339,7 @@ type private JsonParser(jsonText: string) =
     and parseNum () =
         let start = i
 
-        while i < s.Length && (isNumChar s.[i]) do
+        while i < s.Length && isNumChar s.[i] do
             i <- i + 1
 
         let len = i - start
@@ -374,7 +374,7 @@ type private JsonParser(jsonText: string) =
 
         if i < s.Length && s.[i] = '"' then
             parsePair (fun p ->
-                pairs.Add(p)
+                pairs.Add p
                 skipCommentsAndWhitespace ()
 
                 let rec parsePairItem () =
@@ -383,7 +383,7 @@ type private JsonParser(jsonText: string) =
                         skipCommentsAndWhitespace ()
 
                         parsePair (fun p ->
-                            pairs.Add(p)
+                            pairs.Add p
                             skipCommentsAndWhitespace ()
                             parsePairItem ())
                     else
@@ -407,7 +407,7 @@ type private JsonParser(jsonText: string) =
 
         if i < s.Length && s.[i] <> ']' then
             parseValue (fun v ->
-                vals.Add(v)
+                vals.Add v
                 skipCommentsAndWhitespace ()
 
                 let rec parseArrayItem () =
@@ -416,7 +416,7 @@ type private JsonParser(jsonText: string) =
                         skipCommentsAndWhitespace ()
 
                         parseValue (fun v ->
-                            vals.Add(v)
+                            vals.Add v
                             skipCommentsAndWhitespace ()
                             parseArrayItem ())
                     else
@@ -455,7 +455,7 @@ type private JsonParser(jsonText: string) =
 type JsonValue with
 
     /// Parses the specified JSON string
-    static member Parse(text) = JsonParser(text).Parse()
+    static member Parse text = JsonParser(text).Parse()
 
     /// Parses the specified string into multiple JSON values
-    static member ParseMultiple(text) = JsonParser(text).ParseMultiple()
+    static member ParseMultiple text = JsonParser(text).ParseMultiple()

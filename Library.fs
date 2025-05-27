@@ -22,8 +22,8 @@ type CureAction(name: string, description: string, cureName: string, cureDescrip
 
     override this.Clone() =
         let mutable ret = CureAction(name, description, cureName, cureDescription)
-        ret.InitialSchema <- (this.InitialSchema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
-        ret.Schema <- (this.Schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
+        ret.InitialSchema <- this.InitialSchema |> Option.map (fun x -> x.Clone() :?> ObjectSchema)
+        ret.Schema <- this.Schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema)
         ret
 
 type CureField(cureName: string) =
@@ -374,9 +374,9 @@ module Context =
           unlocked = List.contains ty unlAll }
 
     let gene (gene: Gene) : GeneCtx =
-        { name = CLocalisationManager.GetText(gene.geneName)
-          description = CLocalisationManager.GetText(gene.geneDescription)
-          unlocked = CGameManager.localPlayerInfo.GetGeneUnlocked(gene) }
+        { name = CLocalisationManager.GetText gene.geneName
+          description = CLocalisationManager.GetText gene.geneDescription
+          unlocked = CGameManager.localPlayerInfo.GetGeneUnlocked gene }
 
     let geneCategory (ty: Gene.EGeneCategory) : GeneCategoryCtx =
         let name = CLocalisationManager.GetText(CGameManager.GeneCategoryNames[ty])
@@ -506,27 +506,27 @@ module Context =
             | Country.EContinentType.AFRICA -> [ Africa ]
             | Country.EContinentType.ASIA -> [ Asia_Pacific ]
             | _ -> []
-            @ (tag _.cold Cold)
-            @ (tag _.hot Hot)
-            @ (tag _.arid Arid)
-            @ (tag _.humid Humid)
-            @ (tag _.poverty Poverty)
-            @ (tag _.wealthy Wealthy)
-            @ (tag _.rural Rural)
-            @ (tag _.urban Urban)
-            @ (tag _.borderStatus BordersOpen)
-            @ (tag (_.borderStatus >> not) BordersClosed)
-            @ (tag (fun x -> x.hasAirports && not (ld.AreAirportsOpen())) AirportsClosed)
-            @ (tag (fun x -> x.hasPorts && ld.ArePortsOpen()) PortsOpen)
-            @ (tag (fun x -> x.hasPorts && not (ld.ArePortsOpen())) PortsClosed)
-            @ (tag (fun x -> x.hasAirports && ld.AreAirportsOpen()) AirportsOpen)
-            @ (tag (fun x -> x.hasAirports && not (ld.AreAirportsOpen())) AirportsClosed)
-            @ (tag (fun _ -> ld.HasCastle) HasLair)
-            @ (tag _.hasApeColony HasColony)
-            @ (tag (fun _ -> ld.hasDrone) HasDrones)
-            @ (tag _.HasFort() HasEnemyBase)
+            @ tag _.cold Cold
+            @ tag _.hot Hot
+            @ tag _.arid Arid
+            @ tag _.humid Humid
+            @ tag _.poverty Poverty
+            @ tag _.wealthy Wealthy
+            @ tag _.rural Rural
+            @ tag _.urban Urban
+            @ tag _.borderStatus BordersOpen
+            @ tag (_.borderStatus >> not) BordersClosed
+            @ tag (fun x -> x.hasAirports && not (ld.AreAirportsOpen())) AirportsClosed
+            @ tag (fun x -> x.hasPorts && ld.ArePortsOpen()) PortsOpen
+            @ tag (fun x -> x.hasPorts && not (ld.ArePortsOpen())) PortsClosed
+            @ tag (fun x -> x.hasAirports && ld.AreAirportsOpen()) AirportsOpen
+            @ tag (fun x -> x.hasAirports && not (ld.AreAirportsOpen())) AirportsClosed
+            @ tag (fun _ -> ld.HasCastle) HasLair
+            @ tag _.hasApeColony HasColony
+            @ tag (fun _ -> ld.hasDrone) HasDrones
+            @ tag _.HasFort() HasEnemyBase
             // also vampire
-            @ (tag _.hasApeLab HasEnemyLab)
+            @ tag _.hasApeLab HasEnemyLab
 
         let perc = (*) 100f
 
@@ -606,7 +606,7 @@ module Context =
           description = desc }
 
     let vampire (vampire: Vampire) : VampireCtx =
-        { countryName = CLocalisationManager.GetText(vampire.currentCountry.name)
+        { countryName = CLocalisationManager.GetText vampire.currentCountry.name
           health = $"{int vampire.vampireHealth}/{int vampire.vampireHealthMax}" }
 
     let context () : Context =
@@ -636,16 +636,16 @@ module Context =
         let ub =
             typeof<CInterfaceManager>
                 .GetField("mpUserBubble", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                .GetValue(CInterfaceManager.instance)
+                .GetValue
+                CInterfaceManager.instance
             :?> BonusObject
 
         let bubbles =
             ub :: (CInterfaceManager.instance.mpBonuses |> List.ofSeq)
             |> List.filter (fun bubble ->
                 let getBool name =
-                    typeof<BonusObject>
-                        .GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance)
-                        .GetValue(bubble)
+                    typeof<BonusObject>.GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue
+                        bubble
                     :?> bool
 
                 bubble <> null
@@ -671,10 +671,10 @@ module Context =
                     [ "You have enough DNA points to evolve certain transmission vectors/symptoms/abilities for your plague" ]
                 else
                     []
-                @ (if List.isEmpty bubbles then
-                       []
-                   else
-                       [ "You have bubbles available to click, it's heavily recommended you do so to claim some rewards. If you find the amount of bubbles overwhelming, consider lowering game speed." ])
+                @ if List.isEmpty bubbles then
+                      []
+                  else
+                      [ "You have bubbles available to click, it's heavily recommended you do so to claim some rewards. If you find the amount of bubbles overwhelming, consider lowering game speed." ]
 
             if List.isEmpty tips then None else Some tips
           world = world ()
@@ -689,9 +689,8 @@ module Context =
 
 module Actions =
     let map () =
-        typeof<CInterfaceManager>
-            .GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
-            .GetValue(CInterfaceManager.instance)
+        typeof<CInterfaceManager>.GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue
+            CInterfaceManager.instance
         :?> Generic.IDictionary<string, CountryView>
         |> Seq.map _.Value
         |> Seq.toList
@@ -769,29 +768,27 @@ module Actions =
             Set.ofSeq (
                 countries
                 |> Seq.collect (fun x ->
-                    (i2l x.healthyPercent ``Healthy%``)
-                    @ (i2l x.infectedPercent ``Infected%``)
-                    @ (i2l x.deadPercent ``Dead%``)
-                    @ (i2l x.cureInvestmentDollars CureInvestment)
-                    @ (i2l x.publicOrderPercent ``PublicOrder%``)
-                    @ (i2l x.zombiePercent ``Zombie%``)
-                    @ (i2l x.apeHealthyPercent ``ApeHealthy%``)
-                    @ (i2l x.apeInfectedPercent ``ApeInfected%``)
-                    @ (i2l x.apeDeadPercent ``ApeDead%``)
-                    @ (i2l x.authorityLossPercent ``AuthorityLoss%``)
-                    @ (i2l x.noncompliancePercent ``Noncompliance%``))
+                    i2l x.healthyPercent ``Healthy%``
+                    @ i2l x.infectedPercent ``Infected%``
+                    @ i2l x.deadPercent ``Dead%``
+                    @ i2l x.cureInvestmentDollars CureInvestment
+                    @ i2l x.publicOrderPercent ``PublicOrder%``
+                    @ i2l x.zombiePercent ``Zombie%``
+                    @ i2l x.apeHealthyPercent ``ApeHealthy%``
+                    @ i2l x.apeInfectedPercent ``ApeInfected%``
+                    @ i2l x.apeDeadPercent ``ApeDead%``
+                    @ i2l x.authorityLossPercent ``AuthorityLoss%``
+                    @ i2l x.noncompliancePercent ``Noncompliance%``)
             )
             |> Set.map game.Serialize
 
         let act = game.Action QueryCountries
 
         act.MutateProp "tags" (fun x ->
-            ((x :?> ArraySchema).Items :?> StringSchema)
-                .RetainEnum(game.Serialize >> tags.Contains))
+            ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(game.Serialize >> tags.Contains))
 
         act.MutateProp "tagsNot" (fun x ->
-            ((x :?> ArraySchema).Items :?> StringSchema)
-                .RetainEnum(game.Serialize >> tags.Contains))
+            ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(game.Serialize >> tags.Contains))
 
         act.MutateProp "sortBy" (fun x -> (x :?> StringSchema).RetainEnum(game.Serialize >> sortBy.Contains))
 
@@ -959,9 +956,8 @@ type Game(plugin: MainClass) =
     let mutable newBubble: bool = false
 
     let map () =
-        typeof<CInterfaceManager>
-            .GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
-            .GetValue(CInterfaceManager.instance)
+        typeof<CInterfaceManager>.GetField("countryMap", BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue
+            CInterfaceManager.instance
         :?> Generic.IDictionary<string, CountryView>
         |> Seq.map _.Value
         |> Seq.toList
@@ -980,9 +976,8 @@ type Game(plugin: MainClass) =
         let screen = CUIManager.instance.GetCurrentScreen()
 
         let cur =
-            typeof<IGameScreen>
-                .GetField("currentSubScreen", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                .GetValue(screen)
+            typeof<IGameScreen>.GetField("currentSubScreen", BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue
+                screen
             :?> Generic.IDictionary<string, IGameSubScreen>
             |> List.ofSeq
 
@@ -999,7 +994,8 @@ type Game(plugin: MainClass) =
                 let hex =
                     typeof<CTechTreeSubScreen>
                         .GetField("hexes", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                        .GetValue(sub)
+                        .GetValue
+                        sub
                     :?> Generic.IDictionary<int, TechHex>
                     |> _.Values
                     |> Seq.filter _.visible
@@ -1007,7 +1003,8 @@ type Game(plugin: MainClass) =
                         x,
                         typeof<TechHex>
                             .GetField("technology", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                            .GetValue(x)
+                            .GetValue
+                            x
                         :?> Technology)
                     |> Seq.tryFind (snd >> (=) tech)
 
@@ -1030,7 +1027,7 @@ type Game(plugin: MainClass) =
             elif d.CanEvolve tech then
                 let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
                 screen.EvolveDisease(hex, tech, false, CGameManager.localPlayerInfo.disease.evoPointsSpent)
-                CGameManager.game.EvolveTech(tech) |> ignore
+                CGameManager.game.EvolveTech tech |> ignore
                 sub.TechSelected(tech, hex)
                 Ok None
             elif tech.eventLocked then
@@ -1086,7 +1083,7 @@ type Game(plugin: MainClass) =
                 let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
                 screen.EvolveDisease(hex, tech, false, CGameManager.localPlayerInfo.disease.evoPointsSpent)
                 d.DeEvolveTech(tech, false)
-                CGameManager.game.DeEvolveTech(tech) |> ignore
+                CGameManager.game.DeEvolveTech tech |> ignore
                 screen.PreviewTechDevolve null
                 sub.TechSelected(tech, hex)
                 Ok None
@@ -1142,7 +1139,8 @@ type Game(plugin: MainClass) =
             let btns =
                 typeof<CHUDAbilitySubScreen>
                     .GetField("abilitiesButtonMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                    .GetValue(sub)
+                    .GetValue
+                    sub
                 :?> Generic.Dictionary<EAbilityType, AbilityButton>
 
             let cost = CGameManager.GetActiveAbilityCost(ty, d)
@@ -1171,7 +1169,7 @@ type Game(plugin: MainClass) =
                         let screen = CUIManager.instance.GetCurrentScreen() :?> BaseMapScreen
                         let srcPos = src.GetRandomPositionInsideCountry()
                         let dstPos = dst.GetRandomPositionInsideCountry()
-                        sub.StartAbility(btn)
+                        sub.StartAbility btn
 
                         Ok()
                         |> Result.bind (fun () ->
@@ -1245,7 +1243,8 @@ type Game(plugin: MainClass) =
             let btns =
                 typeof<CHUDAbilitySubScreen>
                     .GetField("abilitiesButtonMap", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                    .GetValue(sub)
+                    .GetValue
+                    sub
                 :?> Generic.Dictionary<EAbilityType, AbilityButton>
 
             let cost = CGameManager.GetActiveAbilityCost(ty, d)
@@ -1271,7 +1270,7 @@ type Game(plugin: MainClass) =
                     |> Result.bind (fun () ->
                         let screen = CUIManager.instance.GetCurrentScreen() :?> BaseMapScreen
                         let countryPos = country.GetRandomPositionInsideCountry()
-                        sub.StartAbility(btn)
+                        sub.StartAbility btn
 
                         Ok()
                         |> Result.bind (fun () ->
@@ -1338,25 +1337,25 @@ type Game(plugin: MainClass) =
                 dst
         | TargetedQuarantine countryName ->
             execAction1
-                [ (snd >> _.hasIntel), "You don't have intel on target country"
-                  (snd >> _.lockdownAAActive >> not), "The country is already on lockdown"
-                  (snd >> _.infectedPercent >> (<) 0f), "The country doesn't have any infected people" ]
+                [ snd >> _.hasIntel, "You don't have intel on target country"
+                  snd >> _.lockdownAAActive >> not, "The country is already on lockdown"
+                  snd >> _.infectedPercent >> (<) 0f, "The country doesn't have any infected people" ]
                 EAbilityType.raise_priority
                 countryName
         | TargetedEconomicAid countryName ->
             execAction1
-                [ (snd >> _.hasIntel), "You don't have intel on target country"
-                  (snd >> _.compliance >> (>) 1f), "The country is already fully compliant" ]
+                [ snd >> _.hasIntel, "You don't have intel on target country"
+                  snd >> _.compliance >> (>) 1f, "The country is already fully compliant" ]
                 EAbilityType.economic_support
                 countryName
         | Reanimate countryName ->
             execAction1
-                [ (snd >> _.GetReanimateValue() >> (<) 0), "The country must have dead people" ]
+                [ snd >> _.GetReanimateValue() >> (<) 0, "The country must have dead people" ]
                 EAbilityType.reanimate
                 countryName
         | Rampage countryName ->
             execAction1
-                [ (snd >> _.apeInfectedPopulation >> (<) 0), "The country must have infected apes" ]
+                [ snd >> _.apeInfectedPopulation >> (<) 0, "The country must have infected apes" ]
                 EAbilityType.rampage
                 countryName
         | LethalBoost countryName ->
@@ -1384,27 +1383,27 @@ type Game(plugin: MainClass) =
                 countryName
         | FieldOperatives countryName ->
             execAction1
-                [ (snd >> _.hasTeam >> not), "The field operatives are already in that country"
-                  (snd >> _.disease.vampires.Count >> (<) 0), "You don't have any field operatives"
-                  (snd >> _.disease.vampires.[0].currentCountry >> (<>) null),
+                [ snd >> _.hasTeam >> not, "The field operatives are already in that country"
+                  snd >> _.disease.vampires.Count >> (<) 0, "You don't have any field operatives"
+                  snd >> _.disease.vampires.[0].currentCountry >> (<>) null,
                   "Unknown error: field operatives exist, but aren't present in the world" ]
                 EAbilityType.investigation_team
                 countryName
         | CreateLair countryName ->
             execAction1
-                [ (snd >> _.zombie >> (<) 0), "The country must have vampires"
-                  (snd >> _.castleState >> (=) ECastleState.CASTLE_NONE), "The country already has a lair" ]
+                [ snd >> _.zombie >> (<) 0, "The country must have vampires"
+                  snd >> _.castleState >> (=) ECastleState.CASTLE_NONE, "The country already has a lair" ]
                 EAbilityType.castle
                 countryName
         | CreateColony countryName ->
             execAction1
-                [ (snd >> _.apeInfectedPopulation >> (<) 0), "The country must have infected apes"
-                  (fst >> _.hasApeColony >> not), "The country already has an ape colony" ]
+                [ snd >> _.apeInfectedPopulation >> (<) 0, "The country must have infected apes"
+                  fst >> _.hasApeColony >> not, "The country already has an ape colony" ]
                 EAbilityType.bloodrage
                 countryName
         | ToggleBloodRage countryName ->
             execAction1
-                [ (snd >> _.zombie >> (<) 0), "The country must have vampires" ]
+                [ snd >> _.zombie >> (<) 0, "The country must have vampires" ]
                 EAbilityType.bloodrage
                 countryName
         | BenignMimic countryName ->
@@ -1418,7 +1417,7 @@ type Game(plugin: MainClass) =
 
             execAction1
                 [ (fun _ -> CGameManager.IsVersusMPGame), "The game must be versus multiplayer"
-                  (snd >> _.allInfected >> (<) 0), "The country must have infected people"
+                  snd >> _.allInfected >> (<) 0, "The country must have infected people"
                   (fun (c, ld) -> ld.allInfected + c.deadPopulation >= c.originalPopulation),
                   "You haven't infected enough people in this country to use this ability"
                   (fun (_, ld) -> (ld :?> MPLocalDisease).benignMimicCounter <= 0),
@@ -1436,7 +1435,8 @@ type Game(plugin: MainClass) =
             let ub =
                 typeof<CInterfaceManager>
                     .GetField("mpUserBubble", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                    .GetValue(CInterfaceManager.instance)
+                    .GetValue
+                    CInterfaceManager.instance
                 :?> BonusObject
 
             let allBubbles =
@@ -1444,9 +1444,8 @@ type Game(plugin: MainClass) =
                 @ if ub = null then [] else [ ub ]
                 |> List.filter (fun bubble ->
                     let getBool name =
-                        typeof<BonusObject>
-                            .GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance)
-                            .GetValue(bubble)
+                        typeof<BonusObject>.GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue
+                            bubble
                         :?> bool
 
                     bubble <> null
@@ -1469,7 +1468,7 @@ type Game(plugin: MainClass) =
             else
                 match
                     allBubbles
-                    |> List.tryFind (snd >> (fun x -> x.bubbleName = bubbleName && x.countryName = countryName))
+                    |> List.tryFind (snd >> fun x -> x.bubbleName = bubbleName && x.countryName = countryName)
                 with
                 | Some(bubble, _) ->
                     UICamera.hoveredObject <- null
@@ -1532,7 +1531,7 @@ type Game(plugin: MainClass) =
         | OpenEvolutionScreen ->
             CUIManager.instance.SetActiveScreen "DiseaseScreen"
             CGameManager.SetPaused(true, true)
-            let screen = CUIManager.instance.GetScreen("DiseaseScreen") :?> CDiseaseScreen
+            let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[0].value <- true
             Ok None
         | QueryCountries(tags, tagsNot, count, sortBy, sortDescending) ->
@@ -1633,7 +1632,8 @@ type Game(plugin: MainClass) =
                 let allowI =
                     typeof<CCountrySelect>
                         .GetField("mbAllowInteraction", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                        .GetValue(screen)
+                        .GetValue
+                        screen
                     :?> bool
 
                 typeof<Camera_Zoom>
@@ -1698,7 +1698,7 @@ type Game(plugin: MainClass) =
                             | None ->
                                 let names = genes |> List.map (_.geneName >> CLocalisationManager.GetText)
                                 Error(Some $"Gene {i + 1} not found, available options: {this.Serialize names}"))
-                (Ok(0))
+                (Ok 0)
             |> Result.map (fun _ ->
                 screen.OnClickNext()
                 None)
@@ -1727,11 +1727,11 @@ type Game(plugin: MainClass) =
 
     override _.LogError error =
         let fff = "fff"
-        plugin.Logger.LogError $"{DateTime.UtcNow}.{DateTime.UtcNow.ToString(fff)} {error}"
+        plugin.Logger.LogError $"{DateTime.UtcNow}.{DateTime.UtcNow.ToString fff} {error}"
 
     override _.LogDebug error =
         let fff = "fff"
-        plugin.Logger.LogInfo $"{DateTime.UtcNow}.{DateTime.UtcNow.ToString(fff)} {error}"
+        plugin.Logger.LogInfo $"{DateTime.UtcNow}.{DateTime.UtcNow.ToString fff} {error}"
 
     member this.DoForce<'T> (ephemeral: bool) (ctx: 'T) (prompt: string) (acts: Action list) =
         let acts = acts |> List.filter _.Valid
@@ -1774,10 +1774,11 @@ type Game(plugin: MainClass) =
             let cur =
                 typeof<IGameScreen>
                     .GetField("currentSubScreen", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                    .GetValue(screen)
+                    .GetValue
+                    screen
                 :?> Generic.IDictionary<string, IGameSubScreen>
 
-            let openSub = Seq.tryHead cur |> Option.map (fun x -> (x.Key, x.Value))
+            let openSub = Seq.tryHead cur |> Option.map (fun x -> x.Key, x.Value)
 
             match screen.GetType().Name with
             | "IGameScreen"
@@ -1851,13 +1852,12 @@ type Game(plugin: MainClass) =
                     let ub =
                         typeof<CInterfaceManager>
                             .GetField("mpUserBubble", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                            .GetValue(CInterfaceManager.instance)
+                            .GetValue
+                            CInterfaceManager.instance
                         :?> BonusObject
 
                     let getBool name =
-                        typeof<BonusObject>
-                            .GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance)
-                            .GetValue(ub)
+                        typeof<BonusObject>.GetField(name, BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue ub
                         :?> bool
 
                     if
@@ -1893,7 +1893,7 @@ type Game(plugin: MainClass) =
                                    [ this.Action ClosePopup ]
 
                                []
-                           | "Context", (:? CHUDContextSubScreen) -> []
+                           | "Context", :? CHUDContextSubScreen -> []
                            | "ability", (:? CHUDAbilitySubScreen as sub) ->
                                // TODO active abilities
                                let btns =
@@ -1902,7 +1902,8 @@ type Game(plugin: MainClass) =
                                            "abilitiesButtonMap",
                                            BindingFlags.NonPublic ||| BindingFlags.Instance
                                        )
-                                       .GetValue(sub)
+                                       .GetValue
+                                       sub
                                    :?> Generic.Dictionary<EAbilityType, AbilityButton>
 
                                btns
@@ -2008,9 +2009,9 @@ type Game(plugin: MainClass) =
 
                                 let ctx = Context.context ()
                                 this.Context true (this.Serialize ctx)
-                                (Option.toList (Actions.clickBubble this ctx)) @ allActions
+                                Option.toList (Actions.clickBubble this ctx) @ allActions
                             else
-                                (this.Action ClickBubble) :: allActions
+                                this.Action ClickBubble :: allActions
                             |> List.map (fun x -> x :> obj)
 
                         this.RetainActions allActions
@@ -2075,7 +2076,8 @@ type Game(plugin: MainClass) =
                 let tab =
                     typeof<CDiseaseScreen>
                         .GetField("currentSubscreen", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                        .GetValue(screen)
+                        .GetValue
+                        screen
                     :?> int
 
                 let d = CGameManager.localPlayerInfo.disease
@@ -2089,7 +2091,7 @@ type Game(plugin: MainClass) =
                          | 1 -> _.transmissionName
                          | 2 -> _.symptomName
                          | 3 -> _.abilityName
-                         | _ -> (fun _ -> None))
+                         | _ -> fun _ -> None)
                         >> Option.isSome
                     )
                     |> List.ofSeq
@@ -2207,13 +2209,13 @@ and [<BepInPlugin("org.pavluk.nuerax", "Nuerax", "1.0.0")>] MainClass() =
 
             game <-
                 Some(
-                    let game = Game(this)
+                    let game = Game this
                     game.Start(None, cts.Token) |> ignore
                     game
                 )
 
-            this.Logger.LogInfo($"Plugin Nuerax is loaded with {cnt} patches!")
+            this.Logger.LogInfo $"Plugin Nuerax is loaded with {cnt} patches!"
         with exc ->
-            this.Logger.LogError($"ERROR {exc}")
+            this.Logger.LogError $"ERROR {exc}"
 
     member _.LateUpdate() = game |> Option.iter _.Update()

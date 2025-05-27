@@ -38,7 +38,7 @@ type UnionAttr() =
 type TagName(name: string) =
     inherit UnionAttr()
 
-    override _.TagName = Some(name)
+    override _.TagName = Some name
 
 type CaseAttr() =
     inherit Attribute()
@@ -218,7 +218,7 @@ type Schema(ty: SchemaType) =
     member _.Type = ty
 
     abstract member Clone: unit -> Schema
-    default _.Clone() = Schema(ty)
+    default _.Clone() = Schema ty
 
     abstract member JsonProps: unit -> (string * JsonValue) list
 
@@ -245,7 +245,7 @@ type StringSchema() =
         and set value = enum <- value
 
     override _.EqualTo(other: Schema) =
-        base.EqualTo(other) && enum = (other :?> StringSchema).Enum
+        base.EqualTo other && enum = (other :?> StringSchema).Enum
 
     member _.SetEnum(values: string array) =
         let prev = Option.defaultValue Array.empty enum
@@ -271,7 +271,7 @@ type StringSchema() =
 
     override _.JsonProps() : (string * JsonValue) list =
         (enum
-         |> Option.map (fun x -> ("enum", x |> Array.map JsonValue.String |> JsonValue.Array))
+         |> Option.map (fun x -> "enum", x |> Array.map JsonValue.String |> JsonValue.Array)
          |> Option.toList)
         @ base.JsonProps()
 
@@ -283,12 +283,12 @@ type ObjectSchema(properties: (string * Schema) array) =
     let mutable required: string array option = None
 
     override _.EqualTo(other: Schema) =
-        base.EqualTo(other)
+        base.EqualTo other
         && (let rhs = other :?> ObjectSchema
 
             required = rhs.Required
             && Array.length props = Array.length rhs.Properties
-            && (props |> Array.forall2 (fun (k1, v1) (k2, v2) -> k1 = k2 && v1.EqualTo(v2))) rhs.Properties)
+            && (props |> Array.forall2 (fun (k1, v1) (k2, v2) -> k1 = k2 && v1.EqualTo v2)) rhs.Properties)
 
     override _.Valid =
         match required with
@@ -306,10 +306,9 @@ type ObjectSchema(properties: (string * Schema) array) =
         and set value = required <- value
 
     override _.Clone() =
-        let mutable ret =
-            ObjectSchema(properties |> Array.map (fun (k, v) -> (k, v.Clone())))
+        let mutable ret = ObjectSchema(properties |> Array.map (fun (k, v) -> k, v.Clone()))
 
-        ret.Properties <- props |> Array.map (fun (k, v) -> (k, v.Clone()))
+        ret.Properties <- props |> Array.map (fun (k, v) -> k, v.Clone())
         ret.Required <- required
         ret
 
@@ -318,10 +317,10 @@ type ObjectSchema(properties: (string * Schema) array) =
 
     override this.JsonProps() =
         (this.Required
-         |> Option.map (fun x -> ("required", x |> Array.map JsonValue.String |> JsonValue.Array))
+         |> Option.map (fun x -> "required", x |> Array.map JsonValue.String |> JsonValue.Array)
          |> Option.toList)
-        @ (("properties", JsonValue.Record(this.Properties |> Array.map (fun (s, x) -> (s, x.JsonValue()))))
-           :: base.JsonProps())
+        @ ("properties", JsonValue.Record(this.Properties |> Array.map (fun (s, x) -> s, x.JsonValue())))
+          :: base.JsonProps()
 
 type IntegerSchema() =
     inherit Schema(Integer)
@@ -333,7 +332,7 @@ type IntegerSchema() =
 
     override _.EqualTo(other: Schema) =
 
-        base.EqualTo(other)
+        base.EqualTo other
         && (let rhs = other :?> IntegerSchema
 
             min = rhs.Minimum
@@ -388,7 +387,7 @@ type IntegerSchema() =
     override this.JsonProps() =
         let proc s x n =
             match x with
-            | Some(x) -> (s, JsonValue.Number(decimal x)) :: n
+            | Some x -> (s, JsonValue.Number(decimal x)) :: n
             | None -> n
 
         base.JsonProps()
@@ -413,13 +412,13 @@ type ArraySchema(items: Schema) =
     let mutable maxItems = None
 
     override _.EqualTo(other: Schema) =
-        base.EqualTo(other)
+        base.EqualTo other
         && (let rhs = other :?> ArraySchema
 
             unique = rhs.Unique
             && minItems = rhs.MinItems
             && maxItems = rhs.MaxItems
-            && items.EqualTo(rhs.Items))
+            && items.EqualTo rhs.Items)
 
     member _.Items = items
 
@@ -442,7 +441,7 @@ type ArraySchema(items: Schema) =
              [ ("uniqueItems", JsonValue.Boolean true) ]
          else
              [])
-        @ (Option.toList (Option.map (fun x -> ("maxItems", JsonValue.Number(decimal x))) maxItems))
+        @ Option.toList (Option.map (fun x -> "maxItems", JsonValue.Number(decimal x)) maxItems)
         @ (if minItems = 0 then
                []
            else
@@ -475,12 +474,12 @@ type Action(name: string, description: string) =
             JsonValue.Record(
                 match this.Schema with
                 | None ->
-                    [| ("name", JsonValue.String this.Name)
-                       ("description", JsonValue.String this.Description) |]
-                | Some(schema) ->
-                    [| ("name", JsonValue.String this.Name)
-                       ("description", JsonValue.String this.Description)
-                       ("schema", schema.JsonValue()) |]
+                    [| "name", JsonValue.String this.Name
+                       "description", JsonValue.String this.Description |]
+                | Some schema ->
+                    [| "name", JsonValue.String this.Name
+                       "description", JsonValue.String this.Description
+                       "schema", schema.JsonValue() |]
             )
 
     member this.Valid = not (this.Schema |> Option.exists (_.Valid >> not))
@@ -492,7 +491,7 @@ type Action(name: string, description: string) =
         this.Name = other.Name
         && this.Description = other.Description
         && (Option.isNone this.Schema && Option.isNone other.Schema
-            || Option.defaultValue false ((this.Schema |> Option.map2 (fun a b -> a.EqualTo(b))) other.Schema))
+            || Option.defaultValue false ((this.Schema |> Option.map2 (fun a b -> a.EqualTo b)) other.Schema))
 
     member _.InitialSchema
         with get () = schema1
@@ -501,8 +500,8 @@ type Action(name: string, description: string) =
     default this.Clone() =
         let mutable ret = Action(this.Name, this.InitialDescription)
         ret.Description <- this.Description
-        ret.InitialSchema <- (this.InitialSchema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
-        ret.Schema <- (this.Schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema))
+        ret.InitialSchema <- this.InitialSchema |> Option.map (fun x -> x.Clone() :?> ObjectSchema)
+        ret.Schema <- this.Schema |> Option.map (fun x -> x.Clone() :?> ObjectSchema)
         ret
 
     default _.Description
@@ -522,7 +521,7 @@ module internal TypeInfo =
         let s' = s.Replace("_", "/")
         Regex.Replace(s', @"(\w)([A-Z])", "$1_$2").ToLower()
 
-    let pascalToCamel (s: string) : string = string(s[0]).ToLower() + s.Substring(1)
+    let pascalToCamel (s: string) : string = string(s[0]).ToLower() + s.Substring 1
 
     let fillMissing ((x, y): TypeInfo) : obj option =
         match y with
@@ -550,9 +549,9 @@ module internal TypeInfo =
             ret
         | TypeInfo'.Array x
         | List x -> ArraySchema(schema x)
-        | Serializable -> raise (Exception("can't generate a schema for arbitrary types"))
+        | Serializable -> raise (Exception "can't generate a schema for arbitrary types")
         | Record(x, _) ->
-            let mutable ret = ObjectSchema(x |> Array.map (fun x -> (x.propName, schema x.ty)))
+            let mutable ret = ObjectSchema(x |> Array.map (fun x -> x.propName, schema x.ty))
 
             ret.Required <- Some(x |> Array.filter (_.ty >> optional >> not) |> Array.map _.propName)
             ret
@@ -568,10 +567,10 @@ module internal TypeInfo =
             None
         else
             let mutable ret =
-                ObjectSchema(ty.props |> Array.map (fun x -> (x.propName, schema x.ty)))
+                ObjectSchema(ty.props |> Array.map (fun x -> x.propName, schema x.ty))
 
             ret.Required <- Some(ty.props |> Array.filter (_.ty >> optional >> not) |> Array.map _.propName)
-            Some(ret)
+            Some ret
 
     let rec propInfo (info: PropertyInfo) =
         { propName = pascalToCamel info.Name
@@ -589,74 +588,74 @@ module internal TypeInfo =
         let objArr (arr: Array) : obj array =
             [| 1 .. arr.Length |] |> Array.map (fun i -> arr.GetValue(i - 1))
 
-        (ty,
-         match ty with
-         | ty when ty.IsEnum ->
-             let names = Array.map pascalToSnake (Enum.GetNames ty)
-             let vals = objArr (Enum.GetValues ty)
-             Enum(Array.zip names vals, ty.GetCustomAttributes() |> Array.ofSeq)
-         | ty when ty.IsGenericType && ty.GetGenericTypeDefinition() = typedefof<option<_>> ->
-             let ty' = ty.GetGenericArguments().[0]
-             Option(fromSystemType ty')
-         | ty when ty.IsGenericType && ty.GetGenericTypeDefinition() = typedefof<list<_>> ->
-             let ty' = ty.GetGenericArguments().[0]
-             List(fromSystemType ty')
-         | ty when ty.IsArray ->
-             let ty' = ty.GetElementType()
-             TypeInfo'.Array(fromSystemType ty')
-         | ty when FSharpType.IsRecord ty ->
-             let props = Array.map propInfo (FSharpType.GetRecordFields ty)
-             Record(props, ty.GetCustomAttributes() |> Array.ofSeq)
-         | ty when FSharpType.IsUnion ty ->
-             let cases = Array.map caseInfo (FSharpType.GetUnionCases ty)
-             Union(cases, ty.GetCustomAttributes() |> Array.ofSeq)
-         | ty when ty = typeof<string> -> PrimitiveString
-         | ty when
-             ty = typeof<int>
-             || ty = typeof<int8>
-             || ty = typeof<int16>
-             || ty = typeof<int32>
-             || ty = typeof<int64>
-             || ty = typeof<uint>
-             || ty = typeof<uint8>
-             || ty = typeof<uint16>
-             || ty = typeof<uint32>
-             || ty = typeof<uint64>
-             || ty = typeof<bigint>
-             || ty = typeof<byte>
-             || ty = typeof<sbyte>
-             ->
-             PrimitiveInt
-         | ty when
-             ty = typeof<single>
-             || ty = typeof<double>
-             || ty = typeof<float>
-             || ty = typeof<float32>
-             || ty = typeof<decimal>
-             ->
-             PrimitiveFloat
-         | ty when ty = typeof<bool> -> PrimitiveBool
-         | ty when Array.contains typeof<ISerializable> (ty.GetInterfaces()) -> Serializable
-         | _ -> raise (NotImplementedException($"type info for type {ty.FullName} is not implemented")))
+        ty,
+        match ty with
+        | ty when ty.IsEnum ->
+            let names = Array.map pascalToSnake (Enum.GetNames ty)
+            let vals = objArr (Enum.GetValues ty)
+            Enum(Array.zip names vals, ty.GetCustomAttributes() |> Array.ofSeq)
+        | ty when ty.IsGenericType && ty.GetGenericTypeDefinition() = typedefof<option<_>> ->
+            let ty' = ty.GetGenericArguments().[0]
+            Option(fromSystemType ty')
+        | ty when ty.IsGenericType && ty.GetGenericTypeDefinition() = typedefof<list<_>> ->
+            let ty' = ty.GetGenericArguments().[0]
+            List(fromSystemType ty')
+        | ty when ty.IsArray ->
+            let ty' = ty.GetElementType()
+            TypeInfo'.Array(fromSystemType ty')
+        | ty when FSharpType.IsRecord ty ->
+            let props = Array.map propInfo (FSharpType.GetRecordFields ty)
+            Record(props, ty.GetCustomAttributes() |> Array.ofSeq)
+        | ty when FSharpType.IsUnion ty ->
+            let cases = Array.map caseInfo (FSharpType.GetUnionCases ty)
+            Union(cases, ty.GetCustomAttributes() |> Array.ofSeq)
+        | ty when ty = typeof<string> -> PrimitiveString
+        | ty when
+            ty = typeof<int>
+            || ty = typeof<int8>
+            || ty = typeof<int16>
+            || ty = typeof<int32>
+            || ty = typeof<int64>
+            || ty = typeof<uint>
+            || ty = typeof<uint8>
+            || ty = typeof<uint16>
+            || ty = typeof<uint32>
+            || ty = typeof<uint64>
+            || ty = typeof<bigint>
+            || ty = typeof<byte>
+            || ty = typeof<sbyte>
+            ->
+            PrimitiveInt
+        | ty when
+            ty = typeof<single>
+            || ty = typeof<double>
+            || ty = typeof<float>
+            || ty = typeof<float32>
+            || ty = typeof<decimal>
+            ->
+            PrimitiveFloat
+        | ty when ty = typeof<bool> -> PrimitiveBool
+        | ty when Array.contains typeof<ISerializable> (ty.GetInterfaces()) -> Serializable
+        | _ -> raise (NotImplementedException $"type info for type {ty.FullName} is not implemented")
 
     let rec serialize ((ty, info): TypeInfo) (obj: obj) : JsonValue =
         let serField (info: Property, value: obj) : (string * JsonValue) list =
             let def = lazy (serialize info.ty value)
 
             match
-                (info.attrs
-                 |> Seq.ofArray
-                 |> Seq.map (function
-                     | :? FieldAttr as x -> Seq.singleton x
-                     | _ -> Seq.empty)
-                 |> Seq.concat
-                 |> Seq.fold
-                     (fun state x ->
-                         match state with
-                         | None -> Some(x.Serialized info.propName value def)
-                         | Some [ (name, ser) ] -> Some(x.Serialized name value (lazy ser))
-                         | Some x -> Some x)
-                     None)
+                info.attrs
+                |> Seq.ofArray
+                |> Seq.map (function
+                    | :? FieldAttr as x -> Seq.singleton x
+                    | _ -> Seq.empty)
+                |> Seq.concat
+                |> Seq.fold
+                    (fun state x ->
+                        match state with
+                        | None -> Some(x.Serialized info.propName value def)
+                        | Some [ name, ser ] -> Some(x.Serialized name value (lazy ser))
+                        | Some x -> Some x)
+                    None
             with
             | None -> [ (info.propName, def.Value) ]
             | Some x -> x
@@ -674,7 +673,7 @@ module internal TypeInfo =
         | Record(info, _attrs) ->
             info
             |> Seq.ofArray
-            |> Seq.map (fun info -> (info, FSharpValue.GetRecordField(obj, info.info)))
+            |> Seq.map (fun info -> info, FSharpValue.GetRecordField(obj, info.info))
             |> Seq.map serField
             |> Seq.concat
             |> Array.ofSeq
@@ -687,21 +686,21 @@ module internal TypeInfo =
                 info.props
                 |> Seq.ofArray
                 |> Seq.zip objs
-                |> Seq.map (fun (a, b) -> (b, a))
+                |> Seq.map (fun (a, b) -> b, a)
                 |> Seq.map serField
                 |> Seq.concat
 
             let tagName =
-                (attrs
-                 |> Seq.ofArray
-                 |> Seq.map (function
-                     | :? UnionAttr as x -> Seq.singleton x
-                     | _ -> Seq.empty)
-                 |> Seq.concat
-                 |> Seq.tryPick _.TagName)
+                attrs
+                |> Seq.ofArray
+                |> Seq.map (function
+                    | :? UnionAttr as x -> Seq.singleton x
+                    | _ -> Seq.empty)
+                |> Seq.concat
+                |> Seq.tryPick _.TagName
 
             match tagName with
-            | Some(tagName) ->
+            | Some tagName ->
                 ret
                 |> Seq.append (Seq.singleton (tagName, JsonValue.String info.caseName))
                 |> Array.ofSeq
@@ -744,7 +743,7 @@ module internal TypeInfo =
     let rec readProps (nameMap: Map<string, string>) (path: JsonPath) props jsonProps =
         let src = Map.ofArray jsonProps
 
-        let (res, state) =
+        let res, state =
             Ok()
             |> Array.mapFoldBack
                 (fun (prop: Property) state ->
@@ -765,13 +764,13 @@ module internal TypeInfo =
                         with
                         | Some(name, x) ->
                             match deserialize (Prop name :: path) prop.ty x with
-                            | Ok x -> (x, Ok())
-                            | Error err -> (null, Error(err))
+                            | Ok x -> x, Ok()
+                            | Error err -> null, Error err
                         | None ->
                             match fillMissing prop.ty with
-                            | Some x -> (x, Ok())
-                            | None -> (null, Error(DeserError.missingField (Prop(Array.head fieldNames) :: path)))
-                    | Error _ -> (null, state))
+                            | Some x -> x, Ok()
+                            | None -> null, Error(DeserError.missingField (Prop(Array.head fieldNames) :: path))
+                    | Error _ -> null, state)
                 props
 
         Result.map (fun _ -> res) state
@@ -779,25 +778,25 @@ module internal TypeInfo =
     and deserialize (path: JsonPath) (info: TypeInfo) (obj: JsonValue) : Result<obj, DeserError> =
 
         try
-            let (ty, info') = info
+            let ty, info' = info
 
-            match (info', obj) with
-            | (List info, JsonValue.Array y) ->
-                let listType = typedefof<List<_>>.MakeGenericType([| (fst info) |])
+            match info', obj with
+            | List info, JsonValue.Array y ->
+                let listType = typedefof<List<_>>.MakeGenericType [| fst info |]
                 let cons' = listType.GetMethod "Cons"
                 let cons car cdr = cons'.Invoke(null, [| car; cdr |])
                 let list = (listType.GetProperty "Empty").GetValue null
 
-                (Ok((y.Length - 1, list)))
+                Ok(y.Length - 1, list)
                 |> Array.foldBack
                     (fun obj state ->
                         state
                         |> Result.bind (fun (i: int, ret: obj) ->
                             deserialize (Index i :: path) info obj
-                            |> Result.map (fun x -> (i - 1, cons x ret))))
+                            |> Result.map (fun x -> i - 1, cons x ret)))
                     y
                 |> Result.map snd
-            | (TypeInfo'.Array info, JsonValue.Array y) ->
+            | TypeInfo'.Array info, JsonValue.Array y ->
                 let arr = Array.CreateInstance(fst info, y.Length)
 
                 y
@@ -808,15 +807,15 @@ module internal TypeInfo =
                             deserialize (Index i :: path) info obj
                             |> Result.map (fun x ->
                                 ret.SetValue(x, i)
-                                (i + 1, ret))))
+                                i + 1, ret)))
                     (Ok((0, arr)))
                 |> Result.map (fun x -> snd x :> obj)
-            | (Union(info, _), JsonValue.String name) ->
+            | Union(info, _), JsonValue.String name ->
                 match info |> Array.tryFind (_.caseName >> (=) name) with
                 | Some x when x.props.Length = 0 -> Ok(FSharpValue.MakeUnion(x.info, Array.empty))
                 | Some _ -> Error(DeserError.caseData path)
                 | None -> Error(DeserError.case name (info |> Array.map _.caseName) path)
-            | (Union(info, attrs), JsonValue.Record y) ->
+            | Union(info, attrs), JsonValue.Record y ->
                 let fieldMap =
                     attrs
                     |> Array.collect (function
@@ -833,57 +832,57 @@ module internal TypeInfo =
                     | None -> Error(DeserError.case name (info |> Array.map _.caseName) path)
                 | Some(_, x) -> Error(DeserError.unexpected x "string" (Prop "command" :: path))
                 | None -> Error(DeserError.missingField (Prop "command" :: path))
-            | (Record(props, _), JsonValue.Record y) ->
+            | Record(props, _), JsonValue.Record y ->
                 let res = readProps Map.empty path props y
 
                 Result.map (fun res -> FSharpValue.MakeRecord(ty, res)) res
-            | (Enum(info, _), JsonValue.String name) ->
+            | Enum(info, _), JsonValue.String name ->
                 match info |> Array.tryFind (fst >> (=) name) with
-                | Some(_, x) -> Ok(x)
+                | Some(_, x) -> Ok x
                 | None -> Error(DeserError.case name (Array.map fst info) path)
-            | (Option _, JsonValue.Null) ->
+            | Option _, JsonValue.Null ->
                 let cases = FSharpType.GetUnionCases ty
                 Ok(FSharpValue.MakeUnion(cases.[0], Array.empty))
-            | (Option x, _) ->
+            | Option x, _ ->
                 deserialize path x obj
                 |> Result.map (fun x ->
                     let cases = FSharpType.GetUnionCases ty
                     FSharpValue.MakeUnion(cases.[1], [| x |]))
-            | (PrimitiveString, JsonValue.String x) -> Ok(string x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<int> -> Ok(int x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<int8> -> Ok(int8 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<int16> -> Ok(int16 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<int32> -> Ok(int32 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<int64> -> Ok(int64 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<uint> -> Ok(uint x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<uint8> -> Ok(uint8 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<uint16> -> Ok(uint16 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<uint32> -> Ok(uint32 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<uint64> -> Ok(uint64 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<bigint> -> Ok(bigint x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<byte> -> Ok(byte x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<sbyte> -> Ok(sbyte x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<float> -> Ok(float x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<float32> -> Ok(float32 x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<single> -> Ok(single x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<double> -> Ok(double x)
-            | (PrimitiveInt, JsonValue.Number x) when ty = typeof<decimal> -> Ok(decimal x)
-            | (PrimitiveFloat, JsonValue.Float x) when ty = typeof<float> -> Ok(float x)
-            | (PrimitiveFloat, JsonValue.Float x) when ty = typeof<float32> -> Ok(float32 x)
-            | (PrimitiveFloat, JsonValue.Float x) when ty = typeof<single> -> Ok(single x)
-            | (PrimitiveFloat, JsonValue.Float x) when ty = typeof<double> -> Ok(double x)
-            | (PrimitiveFloat, JsonValue.Float x) when ty = typeof<decimal> -> Ok(decimal x)
-            | (PrimitiveBool, JsonValue.Boolean x) -> Ok(x)
-            | (PrimitiveInt, _) -> Error(DeserError.unexpected obj "integer" path)
-            | (PrimitiveFloat, _) -> Error(DeserError.unexpected obj "number" path)
-            | (PrimitiveBool, _) -> Error(DeserError.unexpected obj "boolean" path)
-            | (PrimitiveString, _) -> Error(DeserError.unexpected obj "string" path)
-            | (Enum _, _) -> Error(DeserError.unexpected obj "string" path)
-            | (List _, _) -> Error(DeserError.unexpected obj "list" path)
-            | (TypeInfo'.Array _, _) -> Error(DeserError.unexpected obj "list" path)
-            | (Record _, _) -> Error(DeserError.unexpected obj "object" path)
-            | (Union _, _) -> Error(DeserError.unexpected obj "object" path)
-            | (Serializable, _) -> Error(DeserError.unexpected obj "serializable" path)
+            | PrimitiveString, JsonValue.String x -> Ok(string x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<int> -> Ok(int x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<int8> -> Ok(int8 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<int16> -> Ok(int16 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<int32> -> Ok(int32 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<int64> -> Ok(int64 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<uint> -> Ok(uint x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<uint8> -> Ok(uint8 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<uint16> -> Ok(uint16 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<uint32> -> Ok(uint32 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<uint64> -> Ok(uint64 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<bigint> -> Ok(bigint x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<byte> -> Ok(byte x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<sbyte> -> Ok(sbyte x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<float> -> Ok(float x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<float32> -> Ok(float32 x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<single> -> Ok(single x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<double> -> Ok(double x)
+            | PrimitiveInt, JsonValue.Number x when ty = typeof<decimal> -> Ok(decimal x)
+            | PrimitiveFloat, JsonValue.Float x when ty = typeof<float> -> Ok(float x)
+            | PrimitiveFloat, JsonValue.Float x when ty = typeof<float32> -> Ok(float32 x)
+            | PrimitiveFloat, JsonValue.Float x when ty = typeof<single> -> Ok(single x)
+            | PrimitiveFloat, JsonValue.Float x when ty = typeof<double> -> Ok(double x)
+            | PrimitiveFloat, JsonValue.Float x when ty = typeof<decimal> -> Ok(decimal x)
+            | PrimitiveBool, JsonValue.Boolean x -> Ok x
+            | PrimitiveInt, _ -> Error(DeserError.unexpected obj "integer" path)
+            | PrimitiveFloat, _ -> Error(DeserError.unexpected obj "number" path)
+            | PrimitiveBool, _ -> Error(DeserError.unexpected obj "boolean" path)
+            | PrimitiveString, _ -> Error(DeserError.unexpected obj "string" path)
+            | Enum _, _ -> Error(DeserError.unexpected obj "string" path)
+            | List _, _ -> Error(DeserError.unexpected obj "list" path)
+            | TypeInfo'.Array _, _ -> Error(DeserError.unexpected obj "list" path)
+            | Record _, _ -> Error(DeserError.unexpected obj "object" path)
+            | Union _, _ -> Error(DeserError.unexpected obj "object" path)
+            | Serializable, _ -> Error(DeserError.unexpected obj "serializable" path)
         with exc ->
             Error(DeserError.exc exc.Message path)
 
@@ -911,7 +910,7 @@ module internal TypeInfo =
                      | _ -> [||])
 
             Result.map (fun res -> Some(FSharpValue.MakeUnion(x.info, res))) res
-        | None -> Ok(None)
+        | None -> Ok None
 
 type Context = { message: string; silent: bool }
 type ActionsRegister = { actions: Action list }
@@ -971,31 +970,31 @@ type Game<'T>() =
     let acts =
         match snd (TypeInfo.fromSystemType typeof<'T>) with
         | Union(a, b) ->
-            (a
-             |> Array.map (fun x ->
-                 // TODO: error message instead of random exception
-                 let act =
-                     x.attrs
-                     |> Array.pick (fun x ->
-                         match x with
-                         | :? Action as act -> Some(act)
-                         | _ -> None)
+            a
+            |> Array.map (fun x ->
+                // TODO: error message instead of random exception
+                let act =
+                    x.attrs
+                    |> Array.pick (fun x ->
+                        match x with
+                        | :? Action as act -> Some act
+                        | _ -> None)
 
-                 act.InitialSchema <- TypeInfo.unionSchema x
-                 act.Schema <- TypeInfo.unionSchema x
-                 (x, act)),
-             b)
-        | _ -> raise (Exception("invalid actions type, must be a union"))
+                act.InitialSchema <- TypeInfo.unionSchema x
+                act.Schema <- TypeInfo.unionSchema x
+                x, act),
+            b
+        | _ -> raise (Exception "invalid actions type, must be a union")
 
     let findActByName =
         if fst acts |> Array.exists (snd >> _.MutableName) then
-            (fun s -> fst acts |> Array.find (snd >> _.Name >> (=) s) |> snd)
+            fun s -> fst acts |> Array.find (snd >> _.Name >> (=) s) |> snd
         else
-            let actMap = fst acts |> Array.map (fun (_, act) -> (act.Name, act)) |> Map.ofArray
-            (fun s -> Map.find s actMap)
+            let actMap = fst acts |> Array.map (fun (_, act) -> act.Name, act) |> Map.ofArray
+            fun s -> Map.find s actMap
 
     let tagMap =
-        fst acts |> Array.map (fun (case, act) -> (case.info.Tag, act)) |> Map.ofArray
+        fst acts |> Array.map (fun (case, act) -> case.info.Tag, act) |> Map.ofArray
 
     let mutable ctorMap = Map.empty
 
@@ -1008,11 +1007,11 @@ type Game<'T>() =
         | :? 'T as x -> Map.find (tagReader x) tagMap
         | x ->
             match Map.tryFind (x.GetHashCode()) ctorMap with
-            | Some(x) -> x
+            | Some x -> x
             | None ->
                 let ty = x.GetType()
-                let invoke = ty.GetMethod("Invoke")
-                let (argType, _) = FSharpType.GetFunctionElements ty
+                let invoke = ty.GetMethod "Invoke"
+                let argType, _ = FSharpType.GetFunctionElements ty
 
                 let args =
                     if FSharpType.IsTuple argType then
@@ -1045,7 +1044,7 @@ type Game<'T>() =
 
     member _.Serialize<'Y>(what: 'Y) : string =
         let ty = TypeInfo.fromSystemType typeof<'Y>
-        (TypeInfo.serialize ty what).ToString(JsonSaveOptions.DisableFormatting)
+        (TypeInfo.serialize ty what).ToString JsonSaveOptions.DisableFormatting
 
     member _.Action(action: obj) = resolveAction action
 
@@ -1064,16 +1063,16 @@ type Game<'T>() =
     member this.Start(url: string option, ct: CancellationToken) : Task =
         let url =
             match url with
-            | Some(url) -> url
-            | None -> System.Environment.GetEnvironmentVariable("NEURO_SDK_WS_URL")
+            | Some url -> url
+            | None -> System.Environment.GetEnvironmentVariable "NEURO_SDK_WS_URL"
 
         if url = null then
-            raise (Exception("Please set NEURO_SDK_WS_URL"))
+            raise (Exception "Please set NEURO_SDK_WS_URL")
 
         let serverCmdTy = TypeInfo.fromSystemType typeof<ServerCommand>
         let gameName = this.Name
 
-        let log (err: string) = this.LogError(err)
+        let log (err: string) = this.LogError err
 
         let proc (cmd: ServerCommand) =
             match cmd with
@@ -1082,12 +1081,12 @@ type Game<'T>() =
 
                 let data =
                     match data with
-                    | Some(x) when x.Length > 0 ->
+                    | Some x when x.Length > 0 ->
                         try
-                            Ok(JsonValue.Parse(x))
+                            Ok(JsonValue.Parse x)
                         with exc ->
                             Error(Some exc.Message)
-                    | _ -> Ok(JsonValue.Null)
+                    | _ -> Ok JsonValue.Null
 
                 let res =
                     data
@@ -1097,11 +1096,11 @@ type Game<'T>() =
 
                             match action with
                             | Ok(Some action) -> this.HandleAction(action :?> 'T)
-                            | Ok(None) ->
+                            | Ok None ->
                                 let names = acts |> fst |> Seq.map (snd >> _.Name) |> String.concat "\", \""
 
                                 Error(Some $"Unknown action name: {name}, expected one of: \"{names}\"")
-                            | Error(err) -> Error(Some $"Invalid action data: {err}")
+                            | Error err -> Error(Some $"Invalid action data: {err}")
                         with exc ->
                             log $"{exc}"
                             Error(Some $"Unhandled exception: {exc.Message}"))
@@ -1137,7 +1136,7 @@ type Game<'T>() =
                                 mapCommand (MsgCmd(Actions_Unregister(gameName, { action_names = unreg })))
                                 @ mapCommand (MsgCmd(Actions_Register(gameName, { actions = actions })))
                             | MsgCmd(Startup game) ->
-                                this.LogDebug("resetting registered actions")
+                                this.LogDebug "resetting registered actions"
                                 registered <- Map.empty
                                 [ (Startup game) ]
                             | MsgCmd(Actions_Register(game, { actions = actions })) ->
@@ -1149,7 +1148,7 @@ type Game<'T>() =
                                         if not x.Valid then
                                             if registered.ContainsKey x.Name then
                                                 unregister <- x.Name :: unregister
-                                                this.LogDebug($"unregistering {x.Name} (invalid)")
+                                                this.LogDebug $"unregistering {x.Name} (invalid)"
                                                 registered <- registered.Remove x.Name
 
                                             false
@@ -1159,11 +1158,11 @@ type Game<'T>() =
                                             | Some y ->
                                                 registered <- Map.add x.Name (x.Clone()) registered
                                                 unregister <- y.Name :: unregister
-                                                this.LogDebug($"reregistering {x.Name}")
+                                                this.LogDebug $"reregistering {x.Name}"
                                                 true
                                             | None ->
                                                 registered <- Map.add x.Name (x.Clone()) registered
-                                                this.LogDebug($"registering {x.Name}")
+                                                this.LogDebug $"registering {x.Name}"
                                                 true)
 
                                 if actions'.IsEmpty then
@@ -1183,7 +1182,7 @@ type Game<'T>() =
                                     actions
                                     |> List.filter (fun name ->
                                         if registered.ContainsKey name then
-                                            this.LogDebug($"unregistering {name}")
+                                            this.LogDebug $"unregistering {name}"
                                             registered <- registered.Remove name
                                             true
                                         else
@@ -1193,7 +1192,7 @@ type Game<'T>() =
                                     []
                                 else
                                     [ Actions_Unregister(game, { action_names = actions }) ]
-                            | MsgCmd(msg) -> [ msg ]
+                            | MsgCmd msg -> [ msg ]
 
                         async {
                             let! ct = Async.CancellationToken
@@ -1207,20 +1206,20 @@ type Game<'T>() =
                                         async {
                                             try
                                                 let data = TypeInfo.serialize clientCmdTy msg
-                                                let text = data.ToString(JsonSaveOptions.DisableFormatting)
+                                                let text = data.ToString JsonSaveOptions.DisableFormatting
                                                 let buffer = Encoding.UTF8.GetBytes text
 
                                                 this.LogDebug $"sending {text}"
 
                                                 do!
-                                                    (Async.AwaitTask(
+                                                    Async.AwaitTask(
                                                         ws.SendAsync(
                                                             ArraySegment<byte>(buffer, 0, buffer.Length),
                                                             WebSocketMessageType.Text,
                                                             true,
                                                             ct
                                                         )
-                                                    ))
+                                                    )
                                             with exc ->
                                                 log $"Send error: {exc}"
                                         })
@@ -1234,7 +1233,7 @@ type Game<'T>() =
                     let ws1 = new ClientWebSocket()
                     ws <- ws1
                     this.LogDebug $"Connecting to {url}"
-                    do! ws1.ConnectAsync(Uri(url), ct)
+                    do! ws1.ConnectAsync(Uri url, ct)
                     this.LogDebug $"Connected to {url}"
 
                     let read () =
@@ -1256,7 +1255,7 @@ type Game<'T>() =
                             let ret = reader.ReadToEnd()
                             reader.Dispose()
                             ms.Dispose()
-                            let x = (ret, res)
+                            let x = ret, res
                             return x
                         }
 
@@ -1264,7 +1263,7 @@ type Game<'T>() =
                         task {
                             while ws1.State = WebSocketState.Open do
                                 try
-                                    let! (text, res) = read ()
+                                    let! text, res = read ()
                                     this.LogDebug $"received {text}"
 
                                     match res.MessageType with
@@ -1272,12 +1271,12 @@ type Game<'T>() =
                                         do! ws1.CloseAsync(WebSocketCloseStatus.NormalClosure, "", ct)
                                     | WebSocketMessageType.Text
                                     | WebSocketMessageType.Binary ->
-                                        let data = JsonValue.Parse(text)
+                                        let data = JsonValue.Parse text
                                         let cmd = TypeInfo.deserialize [] serverCmdTy data
 
                                         match cmd with
-                                        | Ok(data) -> proc (data :?> ServerCommand)
-                                        | Error(err) -> log $"Invalid server command: {err}"
+                                        | Ok data -> proc (data :?> ServerCommand)
+                                        | Error err -> log $"Invalid server command: {err}"
                                     | _ -> ()
                                 with exc ->
                                     log $"Unhandled receive exception: {exc}"

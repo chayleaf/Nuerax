@@ -23,7 +23,7 @@ type public Patches() =
         let field =
             typeof<NewsItemObject>
                 .GetField("mpNewsText", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                .GetValue(__instance)
+                .GetValue __instance
             :?> UILabel
 
         if field <> null then
