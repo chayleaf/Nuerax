@@ -693,26 +693,25 @@ module Actions =
             CInterfaceManager.instance
         :?> Generic.IDictionary<string, CountryView>
         |> Seq.map _.Value
-        |> Seq.toList
 
-    let countryNames () : string list =
-        map () |> List.map (_.GetCountry().name >> CLocalisationManager.GetText)
+    let countryNames () : string seq =
+        map () |> Seq.map (_.GetCountry().name >> CLocalisationManager.GetText)
 
     let nuke<'T> (game: Game<'T>) =
         let act = game.Action Nuke
-        let names = countryNames () |> Array.ofList
+        let names = countryNames () |> Array.ofSeq
         act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
         act
 
     let sendTrojanPlane<'T> (game: Game<'T>) =
         let act = game.Action SendTrojanPlane
-        let names = countryNames () |> Array.ofList
+        let names = countryNames () |> Array.ofSeq
         act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
         act
 
     let sendZombieHordeTo<'T> (game: Game<'T>) =
         let act = game.Action SendZombieHordeTo
-        let names = countryNames () |> Array.ofList
+        let names = countryNames () |> Array.ofSeq
         act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
         act
 
@@ -741,7 +740,7 @@ module Actions =
 
     let chooseStart<'T> (game: Game<'T>) =
         let act = game.Action ChooseStart
-        let names = countryNames () |> Array.ofList
+        let names = countryNames () |> Array.ofSeq
         act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
         act
 
@@ -755,49 +754,57 @@ module Actions =
 
         act
 
-    let queryCountries<'T> (game: Game<'T>) =
-        let countries = map () |> List.map (_.GetCountry() >> Context.country)
+    let queryCountries<'T> (update: bool) (game: Game<'T>) =
+        if update then
+            let countries = map () |> Seq.map (_.GetCountry() >> Context.country)
 
-        let tags =
-            Set.ofSeq (countries |> Seq.collect (_.tags >> Option.defaultValue []))
-            |> Set.map game.Serialize
+            let tags =
+                Set.ofSeq (countries |> Seq.collect (_.tags >> Option.defaultValue []))
+                |> Set.map game.Serialize
 
-        let i2l n x = if n > 0f then [ x ] else []
+            let i2l n x = if n > 0f then [ x ] else []
 
-        let sortBy =
-            Set.ofSeq (
-                countries
-                |> Seq.collect (fun x ->
-                    i2l x.healthyPercent ``Healthy%``
-                    @ i2l x.infectedPercent ``Infected%``
-                    @ i2l x.deadPercent ``Dead%``
-                    @ i2l x.cureInvestmentDollars CureInvestment
-                    @ i2l x.publicOrderPercent ``PublicOrder%``
-                    @ i2l x.zombiePercent ``Zombie%``
-                    @ i2l x.apeHealthyPercent ``ApeHealthy%``
-                    @ i2l x.apeInfectedPercent ``ApeInfected%``
-                    @ i2l x.apeDeadPercent ``ApeDead%``
-                    @ i2l x.authorityLossPercent ``AuthorityLoss%``
-                    @ i2l x.noncompliancePercent ``Noncompliance%``)
-            )
-            |> Set.map game.Serialize
+            let sortBy =
+                Set.ofSeq (
+                    countries
+                    |> Seq.collect (fun x ->
+                        i2l x.healthyPercent ``Healthy%``
+                        @ i2l x.infectedPercent ``Infected%``
+                        @ i2l x.deadPercent ``Dead%``
+                        @ i2l x.cureInvestmentDollars CureInvestment
+                        @ i2l x.publicOrderPercent ``PublicOrder%``
+                        @ i2l x.zombiePercent ``Zombie%``
+                        @ i2l x.apeHealthyPercent ``ApeHealthy%``
+                        @ i2l x.apeInfectedPercent ``ApeInfected%``
+                        @ i2l x.apeDeadPercent ``ApeDead%``
+                        @ i2l x.authorityLossPercent ``AuthorityLoss%``
+                        @ i2l x.noncompliancePercent ``Noncompliance%``)
+                )
+                |> Set.map game.Serialize
 
-        let act = game.Action QueryCountries
+            let act = game.Action QueryCountries
 
-        act.MutateProp "tags" (fun x ->
-            ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(game.Serialize >> tags.Contains))
+            act.MutateProp "tags" (fun x ->
+                ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(game.Serialize >> tags.Contains))
 
-        act.MutateProp "tagsNot" (fun x ->
-            ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(game.Serialize >> tags.Contains))
+            act.MutateProp "tagsNot" (fun x ->
+                ((x :?> ArraySchema).Items :?> StringSchema).RetainEnum(game.Serialize >> tags.Contains))
 
-        act.MutateProp "sortBy" (fun x -> (x :?> StringSchema).RetainEnum(game.Serialize >> sortBy.Contains))
+            act.MutateProp "sortBy" (fun x -> (x :?> StringSchema).RetainEnum(game.Serialize >> sortBy.Contains))
 
-        act
+            act
+        else
+            game.Action QueryCountries
 
-    let focusCountry<'T> (game: Game<'T>) =
+    let focusCountry<'T> (forceUpdate: bool) (game: Game<'T>) =
         let act = game.Action FocusCountry
-        let names = countryNames () |> Array.ofList
-        act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
+
+        act.MutateProp "countryName" (fun x ->
+            let s = x :?> StringSchema in
+
+            if forceUpdate || Option.isNone s.Enum then
+                countryNames () |> Array.ofSeq |> s.SetEnum)
+
         act
 
     let clickBubble<'T> (game: Game<'T>) (ctx: Context) : Action option =
@@ -825,10 +832,10 @@ module Actions =
         if aa.button.isEnabled && d.evoPoints >= cost then
             let names =
                 map ()
-                |> List.map _.GetCountry()
-                |> List.filter (fun c -> validate (c, c.GetLocalDisease d))
-                |> List.map (_.name >> CLocalisationManager.GetText)
-                |> Array.ofList
+                |> Seq.map _.GetCountry()
+                |> Seq.filter (fun c -> validate (c, c.GetLocalDisease d))
+                |> Seq.map (_.name >> CLocalisationManager.GetText)
+                |> Array.ofSeq
 
             if Array.isEmpty names then
                 None
@@ -857,15 +864,15 @@ module Actions =
         if aa.button.isEnabled && d.evoPoints >= cost then
             let names =
                 map ()
-                |> List.map _.GetCountry()
-                |> List.filter (fun c -> validateSrc (c, c.GetLocalDisease d))
-                |> List.map (_.name >> CLocalisationManager.GetText)
-                |> Array.ofList
+                |> Seq.map _.GetCountry()
+                |> Seq.filter (fun c -> validateSrc (c, c.GetLocalDisease d))
+                |> Seq.map (_.name >> CLocalisationManager.GetText)
+                |> Array.ofSeq
 
             if Array.isEmpty names then
                 None
             else
-                let names' = countryNames () |> Array.ofList
+                let names' = countryNames () |> Array.ofSeq
                 let act = game.Action act
                 act.MutateProp "sourceCountryName" (fun x -> (x :?> StringSchema).SetEnum names)
                 act.MutateProp "destinationCountryName" (fun x -> (x :?> StringSchema).SetEnum names')
@@ -960,10 +967,11 @@ type Game(plugin: MainClass) =
             CInterfaceManager.instance
         :?> Generic.IDictionary<string, CountryView>
         |> Seq.map _.Value
-        |> Seq.toList
 
-    let countryNames () : string list =
-        map () |> List.map (_.GetCountry().name >> CLocalisationManager.GetText)
+    let countryNames () : string seq =
+        map () |> Seq.map (_.GetCountry().name >> CLocalisationManager.GetText)
+
+    member _.NextContextTime = nextContextTime
 
     override _.ReregisterActions() =
         forceActs <- None
@@ -1094,7 +1102,7 @@ type Game(plugin: MainClass) =
             if CHUDScreen.instance.HudInterfaceMode = hudMode then
                 match
                     map ()
-                    |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
+                    |> Seq.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
                 with
                 | Some country when CInterfaceManager.instance.mpTargetBubbleStart = country ->
                     Error(Some "The target country can't be the same as the source country")
@@ -1128,11 +1136,11 @@ type Game(plugin: MainClass) =
 
             let src =
                 map
-                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) src)
+                |> Seq.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) src)
 
             let dst =
                 map
-                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) dst)
+                |> Seq.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) dst)
 
             let sub = CHUDScreen.instance.abilitySubscreen
 
@@ -1236,7 +1244,7 @@ type Game(plugin: MainClass) =
 
             let country =
                 map
-                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) country)
+                |> Seq.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) country)
 
             let sub = CHUDScreen.instance.abilitySubscreen
 
@@ -1539,8 +1547,8 @@ type Game(plugin: MainClass) =
 
             let countries =
                 map
-                |> List.map (_.GetCountry() >> Context.country)
-                |> List.filter (fun country ->
+                |> Seq.map (_.GetCountry() >> Context.country)
+                |> Seq.filter (fun country ->
                     tags
                     |> Option.defaultValue List.empty
                     |> List.forall (fun tag -> country.tags |> Option.exists (List.contains tag))
@@ -1553,7 +1561,7 @@ type Game(plugin: MainClass) =
                 | None -> countries
                 | Some sortBy ->
                     countries
-                    |> List.sortBy (
+                    |> Seq.sortBy (
                         match sortBy with
                         | ``Healthy%`` -> _.healthyPercent
                         | ``Infected%`` -> _.infectedPercent
@@ -1570,13 +1578,13 @@ type Game(plugin: MainClass) =
 
             let countries =
                 if Option.defaultValue false sortDescending then
-                    List.rev countries
+                    countries |> Seq.rev |> Array.ofSeq
                 else
-                    countries
+                    countries |> Array.ofSeq
 
             let countries =
                 match count with
-                | Some x when List.length countries > x -> List.take x countries
+                | Some x when Array.length countries > x -> Array.take x countries
                 | _ -> countries
 
             Ok(Some $"{this.Serialize countries}")
@@ -1587,7 +1595,7 @@ type Game(plugin: MainClass) =
             | Some countryName when countryName <> "" ->
                 match
                     map
-                    |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
+                    |> Seq.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
                 with
                 | Some country ->
                     WorldMapController.instance.SetSelectedCountry country
@@ -1624,7 +1632,7 @@ type Game(plugin: MainClass) =
 
             match
                 map
-                |> List.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
+                |> Seq.tryFind (_.GetCountry() >> _.name >> CLocalisationManager.GetText >> (=) countryName)
             with
             | Some country ->
                 let pos = country.GetRandomPositionInsideCountry()
@@ -1865,19 +1873,20 @@ type Game(plugin: MainClass) =
                         && CGameManager.localPlayerInfo.disease.nexus = null
                     then
                         let ctx = Context.context ()
+                        Actions.focusCountry true this |> ignore
 
                         this.DoForce
                             false
                             ctx
                             "Please first pick the starting country and then click the start bubble to confirm your selection."
-                            ([ Actions.chooseStart this; Actions.queryCountries this ]
+                            ([ Actions.chooseStart this; Actions.queryCountries true this ]
                              @ Option.toList (Actions.clickBubble this ctx))
             | "CHUDScreen" ->
                 let allActions: Action list =
                     [ Actions.setGameSpeed this
                       this.Action OpenEvolutionScreen
-                      Actions.queryCountries this
-                      Actions.focusCountry this ]
+                      Actions.queryCountries false this
+                      Actions.focusCountry false this ]
                     @ (cur
                        |> Seq.map (fun sub ->
                            match sub.Key, sub.Value with
@@ -2022,7 +2031,7 @@ type Game(plugin: MainClass) =
                             true
                             ""
                             "Please pick a destination for the trojan plane"
-                            [ Actions.sendTrojanPlane this; Actions.queryCountries this ]
+                            [ Actions.sendTrojanPlane this; Actions.queryCountries true this ]
                     | EHudMode.NukeStrike ->
                         CGameManager.SetPaused(true, true)
 
@@ -2030,7 +2039,7 @@ type Game(plugin: MainClass) =
                             true
                             ""
                             "Please pick a destination for the nuke"
-                            [ Actions.nuke this; Actions.queryCountries this ]
+                            [ Actions.nuke this; Actions.queryCountries true this ]
                     | EHudMode.SendHorde ->
                         CGameManager.SetPaused(true, true)
 
@@ -2038,7 +2047,7 @@ type Game(plugin: MainClass) =
                             true
                             ""
                             "Please pick a destination for the zombie horde"
-                            [ Actions.sendZombieHordeTo this; Actions.queryCountries this ]
+                            [ Actions.sendZombieHordeTo this; Actions.queryCountries true this ]
                     | EHudMode.EconomicSupport
                     | EHudMode.RaisePriority
                     | EHudMode.SendInvestigationTeam
