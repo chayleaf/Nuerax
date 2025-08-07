@@ -800,7 +800,7 @@ module Actions =
         let act = game.Action FocusCountry
 
         act.MutateProp "countryName" (fun x ->
-            let s = x :?> StringSchema in
+            let s = x :?> StringSchema
 
             if forceUpdate || Option.isNone s.Enum then
                 countryNames () |> Array.ofSeq |> s.SetEnum)
@@ -825,36 +825,10 @@ module Actions =
             act.MutateProp "bubbleName" (fun x -> (x :?> StringSchema).SetEnum types)
             act)
 
-    let aa1<'T> act (validate: (Country * LocalDisease) -> bool) (game: Game<'T>) (aa: AbilityButton) : Action option =
-        let d = CGameManager.localPlayerInfo.disease
-        let cost = CGameManager.GetActiveAbilityCost(aa.abilityType, d)
-
-        if aa.button.isEnabled && d.evoPoints >= cost then
-            let names =
-                map ()
-                |> Seq.map _.GetCountry()
-                |> Seq.filter (fun c -> validate (c, c.GetLocalDisease d))
-                |> Seq.map (_.name >> CLocalisationManager.GetText)
-                |> Array.ofSeq
-
-            if Array.isEmpty names then
-                None
-            else
-                let act = game.Action act
-                act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum names)
-
-                if cost > 0 then
-                    act.Description <- act.InitialDescription + $" Costs {cost} DNA points."
-                else
-                    act.Description <- act.InitialDescription + " Does not cost DNA points."
-
-                Some act
-        else
-            None
-
-    let aa2<'T>
+    let aa1<'T>
         act
-        (validateSrc: (Country * LocalDisease) -> bool)
+        (validate: (Country * LocalDisease) -> bool)
+        (forceUpdate: bool)
         (game: Game<'T>)
         (aa: AbilityButton)
         : Action option =
@@ -862,20 +836,73 @@ module Actions =
         let cost = CGameManager.GetActiveAbilityCost(aa.abilityType, d)
 
         if aa.button.isEnabled && d.evoPoints >= cost then
-            let names =
-                map ()
-                |> Seq.map _.GetCountry()
-                |> Seq.filter (fun c -> validateSrc (c, c.GetLocalDisease d))
-                |> Seq.map (_.name >> CLocalisationManager.GetText)
-                |> Array.ofSeq
 
-            if Array.isEmpty names then
-                None
+            let act = game.Action act
+            let mutable isOk = true
+
+            act.MutateProp "countryName" (fun x ->
+                let s = x :?> StringSchema
+
+                if Option.isNone s.Enum || forceUpdate then
+                    let names =
+                        map ()
+                        |> Seq.map _.GetCountry()
+                        |> Seq.filter (fun c -> validate (c, c.GetLocalDisease d))
+                        |> Seq.map (_.name >> CLocalisationManager.GetText)
+                        |> Array.ofSeq
+
+                    s.SetEnum names
+
+                isOk <- Array.isEmpty s.Enum.Value |> not)
+
+            if isOk then
+                if cost > 0 then
+                    act.Description <- act.InitialDescription + $" Costs {cost} DNA points."
+                else
+                    act.Description <- act.InitialDescription + " Does not cost DNA points."
+
+                Some act
             else
-                let names' = countryNames () |> Array.ofSeq
-                let act = game.Action act
-                act.MutateProp "sourceCountryName" (fun x -> (x :?> StringSchema).SetEnum names)
-                act.MutateProp "destinationCountryName" (fun x -> (x :?> StringSchema).SetEnum names')
+                None
+        else
+            None
+
+    let aa2<'T>
+        act
+        (validateSrc: (Country * LocalDisease) -> bool)
+        (forceUpdate: bool)
+        (game: Game<'T>)
+        (aa: AbilityButton)
+        : Action option =
+        let d = CGameManager.localPlayerInfo.disease
+        let cost = CGameManager.GetActiveAbilityCost(aa.abilityType, d)
+
+        if aa.button.isEnabled && d.evoPoints >= cost then
+            let act = game.Action act
+            let mutable isOk = true
+
+            act.MutateProp "sourceCountryName" (fun x ->
+                let s = x :?> StringSchema
+
+                if Option.isNone s.Enum || forceUpdate then
+                    let names =
+                        map ()
+                        |> Seq.map _.GetCountry()
+                        |> Seq.filter (fun c -> validateSrc (c, c.GetLocalDisease d))
+                        |> Seq.map (_.name >> CLocalisationManager.GetText)
+                        |> Array.ofSeq
+
+                    s.SetEnum names
+
+                isOk <- Array.isEmpty s.Enum.Value |> not)
+
+            if isOk then
+                act.MutateProp "destinationCountryName" (fun x ->
+                    let s = x :?> StringSchema
+
+                    if Option.isNone s.Enum || forceUpdate then
+                        let names' = countryNames () |> Array.ofSeq
+                        s.SetEnum names')
 
                 if cost > 0 then
                     act.Description <- act.InitialDescription + $" Costs {cost} DNA points."
@@ -883,6 +910,8 @@ module Actions =
                     act.Description <- act.InitialDescription + " Does not cost DNA points."
 
                 Some act
+            else
+                None
         else
             None
 
@@ -1904,7 +1933,10 @@ type Game(plugin: MainClass) =
                                []
                            | "Context", :? CHUDContextSubScreen -> []
                            | "ability", (:? CHUDAbilitySubScreen as sub) ->
-                               // TODO active abilities
+                               let d = CGameManager.localPlayerInfo.disease
+                               let curDate = (DateTime World.instance.startDate).AddDays d.turnNumber
+                               let forceUpdate = curDate >= nextContextTime
+
                                let btns =
                                    typeof<CHUDAbilitySubScreen>
                                        .GetField(
@@ -1922,56 +1954,63 @@ type Game(plugin: MainClass) =
                                    match item.Key with
                                    // necroa: Active ability enables neurological regeneration in the brains of infected corpses - effectively re-animating some of the dead
                                    // Reanimate: Cellular regeneration makes some dead zombies rise again. Requires 'dead' population. Press button then click on country to select target. Target country must have dead within. (Cost: %s DNA)
-                                   | EAbilityType.reanimate -> Actions.reanimate this aab |> Option.toList
+                                   | EAbilityType.reanimate -> Actions.reanimate forceUpdate this aab |> Option.toList
                                    // necroa: Active ability lets Zombies form hordes to travel across land and water and attack new lands
                                    // Zombie Horde: Gather a horde of zombies to send to another country. Requires 'zombie' population. Press button and click on a start country. Then select destination country. Start country must have zombies in. (Cost: %s DNA)
-                                   | EAbilityType.zombie_horde -> Actions.zombieHorde this aab |> Option.toList
+                                   | EAbilityType.zombie_horde ->
+                                       Actions.zombieHorde forceUpdate this aab |> Option.toList
                                    // simian flu: Apes gain ability to rampage against humans - targeting labs and rescuing captive apes
                                    // Rampage: Intelligent apes come together to build a community, rescue others and protect themselves
-                                   | EAbilityType.rampage -> Actions.apeRampage this aab |> Option.toList
+                                   | EAbilityType.rampage -> Actions.apeRampage forceUpdate this aab |> Option.toList
                                    // simian flu: Apes able to plan and co-ordinate travel together - allowing movement of ape groups over long distances
                                    // Travel: Intelligent apes leave their homes and move to a new location
-                                   | EAbilityType.move -> Actions.apeTravel this aab |> Option.toList
+                                   | EAbilityType.move -> Actions.apeTravel forceUpdate this aab |> Option.toList
                                    // simian flu: Intelligent apes can come together to build a colony which increases ape transmission, protects and generate DNA
                                    // Create Colony: Intelligent apes come together to build a community, rescue others and protect themselves
-                                   | EAbilityType.create_colony -> Actions.createColony this aab |> Option.toList
+                                   | EAbilityType.create_colony ->
+                                       Actions.createColony forceUpdate this aab |> Option.toList
                                    // mp: Unlock an Active Ability that lets you send an infected person to a country of your choice
                                    // Unscheduled Flight: Infected people travel to another country. Can only be sent from a country with at least 1,000 infected population
                                    | EAbilityType.unscheduled_flight ->
-                                       Actions.unscheduledFlight this aab |> Option.toList
+                                       Actions.unscheduledFlight forceUpdate this aab |> Option.toList
                                    // mp: Unlock an Active Ability that makes it significantly easier to kill people infected with both diseases
                                    // Immune Shock: Increase your infectivity and make it significantly easier to kill people infected by both diseases in a target country
-                                   | EAbilityType.immune_shock -> Actions.immuneShock this aab |> Option.toList
+                                   | EAbilityType.immune_shock ->
+                                       Actions.immuneShock forceUpdate this aab |> Option.toList
                                    // mp: Unlock an Active Ability that forces a country to focus cure efforts on the other disease, whilst your disease hides
                                    // Benign Mimic: Target country gains significant boost to research of opponent's disease. (Target must be fully infected and your disease goes dormant there)
-                                   | EAbilityType.benign_mimic -> Actions.benignMimic this aab |> Option.toList
+                                   | EAbilityType.benign_mimic ->
+                                       Actions.benignMimic forceUpdate this aab |> Option.toList
                                    // mp: Unlock an Active Ability that lets you boost infectivity in a country
                                    // Infect Boost: Increase infectivity of both diseases in a target country
-                                   | EAbilityType.infect_boost -> Actions.infectBoost this aab |> Option.toList
+                                   | EAbilityType.infect_boost ->
+                                       Actions.infectBoost forceUpdate this aab |> Option.toList
                                    // mp: Unlock an Active Ability that lets you boost lethality in a country
                                    // Lethal Boost: Increase lethality of both diseases in a target country
-                                   | EAbilityType.lethal_boost -> Actions.lethalBoost this aab |> Option.toList
+                                   | EAbilityType.lethal_boost ->
+                                       Actions.lethalBoost forceUpdate this aab |> Option.toList
                                    // vampire: Vampire gains ability to enter a Blood Rage - will attack research/military facilities if present, otherwise consuming people for DNA
                                    // Blood Rage: Vampire attacks research/military facilities if present, otherwise goes on killing spree to get DNA
-                                   | EAbilityType.bloodrage -> Actions.bloodRage this aab |> Option.toList
+                                   | EAbilityType.bloodrage -> Actions.bloodRage forceUpdate this aab |> Option.toList
                                    // vampire: Vampire gains ability to temporarily mutate into a vast, winged bat-like creature. Allows travel to nearby countries
                                    // Vampire Flight: Send a vampire to another country
-                                   | EAbilityType.vampiretravel -> Actions.vampireFlight this aab |> Option.toList
+                                   | EAbilityType.vampiretravel ->
+                                       Actions.vampireFlight forceUpdate this aab |> Option.toList
                                    // vampire: Vampire able to create a lair for it to rest in and heal. Also generates DNA (Infected population increases DNA)
                                    // Create Lair: Create a lair for the vampire to heal in. Also generates DNA based on infected population
-                                   | EAbilityType.castle -> Actions.createLair this aab |> Option.toList
+                                   | EAbilityType.castle -> Actions.createLair forceUpdate this aab |> Option.toList
                                    // Not technically unlocked by any tech, instead this aa ability is unlocked internally by native code
                                    // Field Operatives: Send the Field Operatives to a target country.
                                    | EAbilityType.investigation_team ->
-                                       Actions.fieldOperatives this aab |> Option.toList
+                                       Actions.fieldOperatives forceUpdate this aab |> Option.toList
                                    // cure: Force a target country to shut border connections and lock down for 1 month.\nNon-Compliance will increase if the public thinks it is unnecessary.
                                    // Targeted Quarantine: Force a target country to shut border connections and lock down for 1 month.
                                    | EAbilityType.raise_priority ->
-                                       Actions.targetedQuarantine this aab |> Option.toList
+                                       Actions.targetedQuarantine forceUpdate this aab |> Option.toList
                                    // cure: Send significant financial aid package the targeted country.
                                    // Targeted Economic Aid: Send significant financial aid package to help a country struggling with Quarantine measures.\nDecrease Non-Compliance in target country
                                    | EAbilityType.economic_support ->
-                                       Actions.targetedEconomicAid this aab |> Option.toList
+                                       Actions.targetedEconomicAid forceUpdate this aab |> Option.toList
                                    // never unlocked, but usable, might be unlockable with scenarios? probably not
                                    // this is also used internally when a nuke bubble is spawned
                                    | EAbilityType.nuke ->

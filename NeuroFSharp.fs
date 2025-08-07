@@ -1278,8 +1278,11 @@ type Game<'T>() =
                                         | Ok data -> proc (data :?> ServerCommand)
                                         | Error err -> log $"Invalid server command: {err}"
                                     | _ -> ()
-                                with exc ->
-                                    log $"Unhandled receive exception: {exc}"
+                                with
+                                | :? WebSocketException as exc ->
+                                    log $"Websocket exception: {exc}"
+                                    do! ws1.CloseAsync(WebSocketCloseStatus.InternalServerError, "", ct)
+                                | exc -> log $"Unhandled receive exception: {exc}"
                         }
 
                     mp.Value.Post(MsgCmd(Startup gameName))
