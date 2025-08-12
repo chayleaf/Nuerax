@@ -2217,7 +2217,7 @@ type Game(plugin: MainClass) =
                     (if tab = 0 then
                          "Choose a screen. You can switch to a different screen at any time."
                      else
-                         "Please pick something to evolve or devolve, or switch to a different screen.")
+                         "Please pick something to evolve, switch to a different screen, or close the evolution screen go back to the game.")
                     acts
 
                 ()
