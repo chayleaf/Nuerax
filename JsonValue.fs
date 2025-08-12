@@ -118,7 +118,7 @@ type JsonValue =
             | Float v when Double.IsPositiveInfinity v -> w.Write "Inf"
             | Float v when Double.IsNegativeInfinity v -> w.Write "-Inf"
             | Float v when Double.IsNaN v -> w.Write "NaN"
-            | Float number -> w.Write number
+            | Float number -> w.Write (number.ToString "0.######")
             | String s ->
                 w.Write "\""
                 JsonValue.JsonStringEncodeTo w s
