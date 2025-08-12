@@ -278,10 +278,12 @@ type Actions =
         symptomName: string
     // TODO: note whether it will refund or cost DNA points and how much
     // note that cost increases with difficulty and with more devolving
-    | [<Action("devolve_transmission", "Devolve an unwanted transmission vector")>] DevolveTransmission of
+    | [<Action("devolve_transmission", "Devolve a transmission vector, making your disease weaker.")>] DevolveTransmission of
         transmissionName: string
-    | [<Action("devolve_ability", "Devolve an unwanted ability")>] DevolveAbility of abilityName: string
-    | [<Action("devolve_symptom", "Devolve an unwanted symptom")>] DevolveSymptom of symptomName: string
+    | [<Action("devolve_ability", "Devolve an ability, making your disease weaker.")>] DevolveAbility of
+        abilityName: string
+    | [<Action("devolve_symptom", "Devolve a symptom, making your disease weaker.")>] DevolveSymptom of
+        symptomName: string
     | [<Action("query_countries",
                "Query countries' statistics. This can help you decide how you should evolve your plague.")>] QueryCountries of
         // tags: cold, hot, arid, humid, poor, rich, rural, urban,
@@ -1055,20 +1057,26 @@ type Game(plugin: MainClass) =
                     |> Seq.collect (Context.tech techMap >> f >> Option.toList)
 
                 Error(Some $"{t} named {this.Serialize s} was not found, available options: {this.Serialize opts}")
+        let costStr n =
+            if n = 0 then ""
+            else if n > 0 then $" for {n} DNA points"
+            else $" giving you {n} DNA points"
 
         let evolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
+            let cost = d.GetEvolveCost tech
+            let name = CLocalisationManager.GetText tech.name
             if d.IsTechEvolved tech then
-                Error(Some "This is already evolved!")
+                Error(Some $"{name} is already evolved!")
             elif d.GetEvolveCost tech > d.evoPoints then
-                Error(Some $"This costs {d.GetEvolveCost tech} DNA points, while you only have {d.evoPoints} points!")
+                Error(Some $"{name} costs {cost} DNA points, while you only have {d.evoPoints} points!")
             elif d.CanEvolve tech then
                 let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
                 screen.EvolveDisease(hex, tech, false, CGameManager.localPlayerInfo.disease.evoPointsSpent)
                 CGameManager.game.EvolveTech tech |> ignore
                 sub.TechSelected(tech, hex)
-                Ok None
+                Ok(Some $"Evolved {name}{costStr cost}")
             elif tech.eventLocked then
-                Error(Some "This is currently locked and can't be evolved")
+                Error(Some $"{name} is currently locked and can't be evolved")
             else
                 let techMap = d.technologies |> Seq.map (fun x -> x.id, x) |> Map.ofSeq
 
@@ -1106,15 +1114,17 @@ type Game(plugin: MainClass) =
                                [ $"*any* of the following must be evolved: {techNames tech.requiredTechOR}" ])
                     )
 
-                Error(Some $"The tech can't be researched because some of the prerequisites were not met: {text}")
+                Error(Some $"{name} can't be researched because some of the prerequisites were not met: {text}")
 
         let devolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
+            let cost = d.GetDeEvolveCost tech
+            let name = CLocalisationManager.GetText tech.name
             if not (d.IsTechEvolved tech) then
-                Error(Some "This is not yet evolved!")
+                Error(Some $"{name} is not yet evolved!")
             elif d.GetDeEvolveCost tech > d.evoPoints then
                 Error(
                     Some
-                        $"Deevolving this costs {d.GetDeEvolveCost tech} DNA points, while you only have {d.evoPoints} points!"
+                        $"Deevolving {name} costs {d.GetDeEvolveCost tech} DNA points, while you only have {d.evoPoints} points!"
                 )
             elif d.CanDeEvolve tech then
                 let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
@@ -1123,9 +1133,9 @@ type Game(plugin: MainClass) =
                 CGameManager.game.DeEvolveTech tech |> ignore
                 screen.PreviewTechDevolve null
                 sub.TechSelected(tech, hex)
-                Ok None
+                Ok(Some $"Devolved {name}{costStr cost}")
             else
-                Error(Some "This can't be devolved!")
+                Error(Some $"{name} can't be devolved!")
 
         let postBubbleDifferentTargetAction act hudMode countryName =
             if CHUDScreen.instance.HudInterfaceMode = hudMode then
@@ -1540,15 +1550,15 @@ type Game(plugin: MainClass) =
         | OpenTransmissionScreen ->
             let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[1].value <- true
-            Ok None
+            Ok(Some "Currently viewing transmissions")
         | OpenSymptomsScreen ->
             let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[2].value <- true
-            Ok None
+            Ok(Some "Currently viewing symptoms")
         | OpenAbilitiesScreen ->
             let screen = CUIManager.instance.GetScreen "DiseaseScreen" :?> CDiseaseScreen
             screen.diseaseToggles.[3].value <- true
-            Ok None
+            Ok(Some "Currently viewing abilities")
         | EvolveAbility abilityName -> findTech _.abilityName abilityName "Ability" "Abilities" |> Result.bind evolve
         | EvolveSymptom symptomName -> findTech _.symptomName symptomName "Symptom" "Symptoms" |> Result.bind evolve
         | EvolveTransmission transmissionName ->
@@ -1564,7 +1574,7 @@ type Game(plugin: MainClass) =
             CUIManager.instance.HideOverlay "Red_Confirm_Overlay_Devolve_Cure"
             CUIManager.instance.SetActiveScreen "HUDScreen"
             CGameManager.SetPaused(false, true)
-            Ok None
+            Ok(Some "Returned to the game")
         | OpenEvolutionScreen ->
             CUIManager.instance.SetActiveScreen "DiseaseScreen"
             CGameManager.SetPaused(true, true)
@@ -1702,7 +1712,7 @@ type Game(plugin: MainClass) =
             else
                 sub.input.value <- name
                 screen.OnClickNext()
-                Ok None
+                Ok(Some $"Your plague is now named {name}")
         | ChooseGenes(gene1, gene2, gene3, gene4, gene5) ->
             let screen = CUIManager.instance.GetCurrentScreen() :?> CGSScreen
             let sub = screen.GetActiveSubScreen() :?> CGSGeneSubScreen
@@ -1751,7 +1761,7 @@ type Game(plugin: MainClass) =
                 let sub = screen.GetActiveSubScreen() :?> CGSDiseaseSubScreen
                 sub.SetDiseaseType(x, true)
                 screen.OnClickNext()
-                Ok None
+                Ok(Some $"You will play as {diseaseName}")
             | None ->
                 $"This plague doesn't exist, or isn't unlocked! Available plagues: {unlAll |> List.map snd |> this.Serialize}"
                 |> (Some >> Error)
@@ -2067,7 +2077,7 @@ type Game(plugin: MainClass) =
                         CGameManager.SetPaused(true, true)
 
                         this.DoForce
-                            true
+                            false
                             ""
                             "Please pick a destination for the trojan plane"
                             [ Actions.sendTrojanPlane this; Actions.queryCountries true this ]
@@ -2075,7 +2085,7 @@ type Game(plugin: MainClass) =
                         CGameManager.SetPaused(true, true)
 
                         this.DoForce
-                            true
+                            false
                             ""
                             "Please pick a destination for the nuke"
                             [ Actions.nuke this; Actions.queryCountries true this ]
@@ -2083,7 +2093,7 @@ type Game(plugin: MainClass) =
                         CGameManager.SetPaused(true, true)
 
                         this.DoForce
-                            true
+                            false
                             ""
                             "Please pick a destination for the zombie horde"
                             [ Actions.sendZombieHordeTo this; Actions.queryCountries true this ]
