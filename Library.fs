@@ -1060,7 +1060,7 @@ type Game(plugin: MainClass) =
         let costStr n =
             if n = 0 then ""
             else if n > 0 then $" for {n} DNA points"
-            else $" giving you {n} DNA points"
+            else $" giving you {-n} DNA points"
 
         let evolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
             let cost = d.GetEvolveCost tech
