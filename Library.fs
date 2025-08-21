@@ -844,6 +844,11 @@ module Actions =
 
     let clickBubble<'T> (game: Game<'T>) (ctx: Context) : Action option =
         ctx.bubbles
+        |> Option.orElseWith (fun () ->
+            let act = game.Action ClickBubble
+            act.MutateProp "countryName" (fun x -> (x :?> StringSchema).SetEnum [||])
+            act.MutateProp "bubbleName" (fun x -> (x :?> StringSchema).SetEnum [||])
+            None)
         |> Option.map (fun bubbles ->
             let act = game.Action ClickBubble
 
