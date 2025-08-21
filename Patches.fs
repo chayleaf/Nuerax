@@ -5,7 +5,7 @@ open HarmonyLib
 
 [<HarmonyPatch>]
 type public Patches() =
-    static let autoClick = false
+    static let autoClick = true
 
     [<HarmonyPatch(typeof<BonusObject>, nameof Unchecked.defaultof<BonusObject>.Initialise)>]
     [<HarmonyPostfix>]

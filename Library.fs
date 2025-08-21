@@ -361,6 +361,10 @@ type TechScreenCtx =
       abilities: TechCtx list option }
 
 module Context =
+    let enableDevolves = false
+    // also makes tech list transient
+    let enableHiddenTechs = false
+
     let disease (ty: Disease.EDiseaseType) : PlagueCtx =
         let unlAll = CGameManager.localPlayerInfo.GetUnlockedDiseases() |> Seq.toList
         let name = CGameManager.GetDiseaseNameLoc ty
@@ -448,9 +452,9 @@ module Context =
           conflicts = mkReq true tech.notTechOR tech.notTechAND
           evolved = evolved
           canEvolve = if evolved then None else Some(d.CanEvolve tech)
-          canDevolve = if evolved then Some(d.CanDeEvolve tech) else None
+          canDevolve = if evolved && enableDevolves then Some(d.CanDeEvolve tech) else None
           evolutionCost = if evolved then None else Some(d.GetEvolveCost tech)
-          devolutionCost = if evolved then Some(d.GetDeEvolveCost tech) else None
+          devolutionCost = if evolved && enableDevolves then Some(d.GetDeEvolveCost tech) else None
           ``globalInfectivityChange%`` = int tech.changeToInfectiousness
           ``globalSeverityChange%`` = int tech.changeToSeverity
           ``globalLethalityChange%`` = int tech.changeToLethality }
@@ -2161,6 +2165,8 @@ type Game(plugin: MainClass) =
                     | 3 -> Some EvolveAbility, Some DevolveAbility, "abilityName", _.abilityName
                     | _ -> None, None, "", (fun _ -> None)
 
+                let devolve = if Context.enableDevolves then devolve else None
+
                 let acts =
                     (if tab = 1 then
                          []
@@ -2212,7 +2218,7 @@ type Game(plugin: MainClass) =
                       abilities = if tab = 3 then Some techs else None }
 
                 this.DoForce
-                    true
+                    (tab = 0)
                     ctx
                     (if tab = 0 then
                          "Choose a screen. You can switch to a different screen at any time."
