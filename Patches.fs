@@ -5,25 +5,23 @@ open HarmonyLib
 
 [<HarmonyPatch>]
 type public Patches() =
-    static let autoClick = true
-
     [<HarmonyPatch(typeof<BonusObject>, nameof Unchecked.defaultof<BonusObject>.Initialise)>]
     [<HarmonyPostfix>]
-    static member public InitBubble(__instance: NewsItemObject) = MainClass.Instance.Game.NewBubble()
+    static member public InitBubble(__instance: NewsItemObject) =
+        MainClass.Instance.Game.NewBubble()
 
     [<HarmonyPatch(typeof<BonusObject>, "Update")>]
     [<HarmonyPostfix>]
     static member public BonusUpdate(__instance: BonusObject) =
-        if autoClick then
+        if Context.autoClick __instance then
             __instance.OnMouseDown()
 
     [<HarmonyPatch(typeof<NewsItemObject>, nameof Unchecked.defaultof<NewsItemObject>.SetNewsItem)>]
     [<HarmonyPostfix>]
     static member public News(__instance: NewsItemObject) =
         let field =
-            typeof<NewsItemObject>
-                .GetField("mpNewsText", BindingFlags.NonPublic ||| BindingFlags.Instance)
-                .GetValue __instance
+            typeof<NewsItemObject>.GetField("mpNewsText", BindingFlags.NonPublic ||| BindingFlags.Instance).GetValue
+                __instance
             :?> UILabel
 
         if field <> null then
@@ -32,7 +30,7 @@ type public Patches() =
     [<HarmonyPatch(typeof<SPDisease>, nameof Unchecked.defaultof<SPDisease>.OnBonusIconClicked)>]
     [<HarmonyPostfix>]
     static member public BonusClicked(bonusIcon: BonusIcon) =
-        if autoClick then
+        if Context.autoClick2 bonusIcon then
             MainClass.Instance.Game.BubblePopped bonusIcon
 
     (*[<HarmonyPatch(typeof<CPlayerInfoSteam>, nameof Unchecked.defaultof<CPlayerInfoSteam>.GetDiseaseUnlocked)>]

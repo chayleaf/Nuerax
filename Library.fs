@@ -1,4 +1,4 @@
-﻿namespace Nuerax
+namespace Nuerax
 
 open System
 open System.Collections
@@ -365,6 +365,26 @@ module Context =
     // also makes tech list transient
     let enableHiddenTechs = false
 
+    let autoClick (bubble: BonusObject) =
+        bubble.``type`` = BonusIcon.EBonusIconType.DNA
+        || bubble.``type`` = BonusIcon.EBonusIconType.INFECT
+        || bubble.``type`` = BonusIcon.EBonusIconType.DEATH
+        || bubble.``type`` = BonusIcon.EBonusIconType.CASTLE
+        || bubble.``type`` = BonusIcon.EBonusIconType.APE_COLONY
+        || bubble.``type`` = BonusIcon.EBonusIconType.CURE
+        || bubble.``type`` = BonusIcon.EBonusIconType.DISEASE_ORIGIN_COUNTRY
+        || bubble.``type`` = BonusIcon.EBonusIconType.DEADBUBBLE_FOR_CURE
+
+    let autoClick2 (bubble: BonusIcon) =
+        bubble.``type`` = BonusIcon.EBonusIconType.DNA
+        || bubble.``type`` = BonusIcon.EBonusIconType.INFECT
+        || bubble.``type`` = BonusIcon.EBonusIconType.DEATH
+        || bubble.``type`` = BonusIcon.EBonusIconType.CASTLE
+        || bubble.``type`` = BonusIcon.EBonusIconType.APE_COLONY
+        || bubble.``type`` = BonusIcon.EBonusIconType.CURE
+        || bubble.``type`` = BonusIcon.EBonusIconType.DISEASE_ORIGIN_COUNTRY
+        || bubble.``type`` = BonusIcon.EBonusIconType.DEADBUBBLE_FOR_CURE
+
     let disease (ty: Disease.EDiseaseType) : PlagueCtx =
         let unlAll = CGameManager.localPlayerInfo.GetUnlockedDiseases() |> Seq.toList
         let name = CGameManager.GetDiseaseNameLoc ty
@@ -452,9 +472,17 @@ module Context =
           conflicts = mkReq true tech.notTechOR tech.notTechAND
           evolved = evolved
           canEvolve = if evolved then None else Some(d.CanEvolve tech)
-          canDevolve = if evolved && enableDevolves then Some(d.CanDeEvolve tech) else None
+          canDevolve =
+            if evolved && enableDevolves then
+                Some(d.CanDeEvolve tech)
+            else
+                None
           evolutionCost = if evolved then None else Some(d.GetEvolveCost tech)
-          devolutionCost = if evolved && enableDevolves then Some(d.GetDeEvolveCost tech) else None
+          devolutionCost =
+            if evolved && enableDevolves then
+                Some(d.GetDeEvolveCost tech)
+            else
+                None
           ``globalInfectivityChange%`` = int tech.changeToInfectiousness
           ``globalSeverityChange%`` = int tech.changeToSeverity
           ``globalLethalityChange%`` = int tech.changeToLethality }
@@ -656,6 +684,7 @@ module Context =
 
                 bubble <> null
                 && bubble.mpCountry <> null
+                && not (autoClick bubble)
                 && not (getBool "mbUnclickable")
                 && not (getBool "mbBlocked")
                 && not (getBool "mbClicked")
@@ -1061,6 +1090,7 @@ type Game(plugin: MainClass) =
                     |> Seq.collect (Context.tech techMap >> f >> Option.toList)
 
                 Error(Some $"{t} named {this.Serialize s} was not found, available options: {this.Serialize opts}")
+
         let costStr n =
             if n = 0 then ""
             else if n > 0 then $" for {n} DNA points"
@@ -1069,6 +1099,7 @@ type Game(plugin: MainClass) =
         let evolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
             let cost = d.GetEvolveCost tech
             let name = CLocalisationManager.GetText tech.name
+
             if d.IsTechEvolved tech then
                 Error(Some $"{name} is already evolved!")
             elif d.GetEvolveCost tech > d.evoPoints then
@@ -1123,6 +1154,7 @@ type Game(plugin: MainClass) =
         let devolve (tech: Technology, hex: TechHex, sub: CTechTreeSubScreen) =
             let cost = d.GetDeEvolveCost tech
             let name = CLocalisationManager.GetText tech.name
+
             if not (d.IsTechEvolved tech) then
                 Error(Some $"{name} is not yet evolved!")
             elif d.GetDeEvolveCost tech > d.evoPoints then
@@ -2073,6 +2105,7 @@ type Game(plugin: MainClass) =
                                 this.Context true (this.Serialize ctx)
                                 Option.toList (Actions.clickBubble this ctx) @ allActions
                             else
+                                // don't update bubble action if context isn't being refreshed
                                 this.Action ClickBubble :: allActions
                             |> List.map (fun x -> x :> obj)
 
