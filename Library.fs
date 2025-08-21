@@ -384,7 +384,9 @@ module Context =
         || bubble.``type`` = BonusIcon.EBonusIconType.DEADBUBBLE_FOR_CURE
 
     let disease (ty: Disease.EDiseaseType) : PlagueCtx =
-        let unlAll = CGameManager.localPlayerInfo.GetUnlockedDiseases() |> Seq.toList
+        let unlAll = CGameManager.localPlayerInfo.GetUnlockedDiseases()
+                     |> Seq.filter (fun x -> x <> Disease.EDiseaseType.SIMIAN_FLU && x <> Disease.EDiseaseType.VAMPIRE)
+                     |> Seq.toList
         let name = CGameManager.GetDiseaseNameLoc ty
         let desc = CGameManager.DiseaseDescriptions.[ty]
         let next = CGameManager.GetDiseaseNext ty
@@ -1791,6 +1793,7 @@ type Game(plugin: MainClass) =
         | ChoosePlague diseaseName ->
             let unlAll =
                 CGameManager.localPlayerInfo.GetUnlockedDiseases()
+                |> Seq.filter (fun x -> x <> Disease.EDiseaseType.SIMIAN_FLU && x <> Disease.EDiseaseType.VAMPIRE)
                 |> Seq.map (fun x -> x, CGameManager.GetDiseaseNameLoc x)
                 |> List.ofSeq
 
