@@ -362,8 +362,6 @@ type TechScreenCtx =
 
 module Context =
     let enableDevolves = false
-    // also makes tech list transient
-    let enableHiddenTechs = false
 
     let autoClick (bubble: BonusObject) =
         bubble.``type`` = BonusIcon.EBonusIconType.DNA
