@@ -1840,16 +1840,16 @@ type Game(plugin: MainClass) =
         this.Context false $"Breaking news: {text}"
 
     member this.BubblePopped(bubble: BonusIcon) =
-        let ctx = this.Context true
+        // let ctx = this.Context true
 
         match bubble.``type`` with
-        | BonusIcon.EBonusIconType.DNA -> ctx "Clicked a DNA bubble, got some DNA"
-        | BonusIcon.EBonusIconType.CURE -> ctx "Clicked a cure bubble, slowed down cure research"
-        | BonusIcon.EBonusIconType.INFECT -> ctx "Clicked an infection bubble, got some DNA"
-        | BonusIcon.EBonusIconType.DEATH -> ctx "Clicked a death bubble, got some DNA"
-        | BonusIcon.EBonusIconType.NEURAX -> ctx "Clicked a Neurax bubble"
-        | BonusIcon.EBonusIconType.APE_COLONY -> ctx "Clicked an ape colony bubble, got some DNA"
-        | BonusIcon.EBonusIconType.CASTLE -> ctx "Clicked a castle bubble, got some DNA"
+        // | BonusIcon.EBonusIconType.DNA -> ctx "Clicked a DNA bubble, got some DNA"
+        // | BonusIcon.EBonusIconType.CURE -> ctx "Clicked a cure bubble, slowed down cure research"
+        // | BonusIcon.EBonusIconType.INFECT -> ctx "Clicked an infection bubble, got some DNA"
+        // | BonusIcon.EBonusIconType.DEATH -> ctx "Clicked a death bubble, got some DNA"
+        // | BonusIcon.EBonusIconType.NEURAX -> ctx "Clicked a Neurax bubble"
+        // | BonusIcon.EBonusIconType.APE_COLONY -> ctx "Clicked an ape colony bubble, got some DNA"
+        // | BonusIcon.EBonusIconType.CASTLE -> ctx "Clicked a castle bubble, got some DNA"
         | _ -> ()
 
     member this.Update() =
