@@ -1855,6 +1855,7 @@ type Game(plugin: MainClass) =
     member this.Update() =
         COptionsManager.instance.BackgroundPause <- EState.Off
         UnityEngine.Application.runInBackground <- true
+        COptionsManager.instance.mbPityMode <- true
         UnityEngine.PlayerPrefs.SetInt("isRunInBG", 1)
         // let sc = UnityEngine.Object.FindObjectOfType<CMainStartSubScreen>()
         let screen = CUIManager.instance.GetCurrentScreen() //.GetScreen("MainMenuScreen")
@@ -1916,8 +1917,8 @@ type Game(plugin: MainClass) =
 
                         this.DoForce true c "Please pick genes for your plague." [ Actions.chooseGenes this c ]
                 | Some("main", (:? CGSDifficultySubScreen as x)) ->
-                    // hardcode normal difficulty
-                    x.ChooseDifficulty(x.buttons.[1], true)
+                    // hardcode easy difficulty
+                    x.ChooseDifficulty(x.buttons.[0], true)
                 | Some("main", (:? CGSNameSubScreen as x)) ->
                     let iv = x.input.value
 
@@ -1980,7 +1981,7 @@ type Game(plugin: MainClass) =
                                    false
                                    ctx
                                    "Close the popup when you're ready to continue."
-                                   [ this.Action ClosePopup ]
+                                   [ this.Action ClosePopup; this.Action OpenEvolutionScreen ]
 
                                []
                            | "Context", :? CHUDContextSubScreen -> []
